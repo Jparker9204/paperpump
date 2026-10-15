@@ -21,6 +21,7 @@ class Quote:
     dex: str
     url: str
     volume_24h: float = 0.0
+    pair_address: str = ""
 
     @property
     def age(self) -> str:
@@ -46,7 +47,7 @@ def parse_pairs(mint: str, data) -> Quote | None:
                  float((p.get("liquidity") or {}).get("usd") or 0),
                  float(p.get("marketCap") or p.get("fdv") or 0),
                  p.get("pairCreatedAt"), p.get("dexId", "?"), p.get("url", ""),
-                 float((p.get("volume") or {}).get("h24") or 0))
+                 float((p.get("volume") or {}).get("h24") or 0), p.get("pairAddress", ""))
 
 
 class DexScreener:

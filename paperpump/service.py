@@ -4,7 +4,7 @@ import re
 import time
 
 from . import fill as fm
-from .db import DB
+from .db import DB, DBConflict
 
 MINT_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
 
@@ -65,7 +65,10 @@ class Trader:
         q, q2, sol_usd = await self._quotes(mint)
         f = fm.simulate_buy(sol, q.price_sol, q2.price_sol, fm.sol_reserve(q2.liquidity_usd, sol_usd),
                             self.cfg.fee_rate, self.cfg.priority_fee)
-        self.db.record_buy(tg_id, mint, q.symbol, f)
+        try:
+            self.db.record_buy(tg_id, mint, q.symbol, f)
+        except DBConflict as e:
+            raise TradeError(str(e)) from e
         return q2, f, sol_usd
 
     async def _sell(self, tg_id, mint, percent, pos=None):
@@ -78,7 +81,10 @@ class Trader:
         tokens = pos["tokens"] * percent / 100
         f = fm.simulate_sell(tokens, q.price_sol, q2.price_sol, fm.sol_reserve(q2.liquidity_usd, sol_usd),
                              self.cfg.fee_rate, self.cfg.priority_fee)
-        realized = self.db.record_sell(pos, f)
+        try:
+            realized = self.db.record_sell(pos, f)
+        except DBConflict as e:
+            raise TradeError(str(e)) from e
         return q2, f, sol_usd, realized
 
     def reset(self, tg_id, now=None):

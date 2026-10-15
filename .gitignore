@@ -4,3 +4,6 @@ __pycache__/
 *.db
 .pytest_cache/
 .ruff_cache/
+*.log
+.site_password
+screens/*.tmp

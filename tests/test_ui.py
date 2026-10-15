@@ -16,7 +16,7 @@ def test_callback_data_fits_telegram_limit():
 
 def test_menu_has_all_items_and_no_command_list():
     data = all_data(ui.menu_kb())
-    assert set(data) == {f"m|{k}" for k in ui.MENU_LABELS.values()}
+    assert set(data) == {f"m|{k}" for k in ui.MENU_LABELS.values()} | {"m|web"}
     text = ui.menu_text(100) + ui.HELP_TEXT
     assert "/buy" not in text and "/sell" not in text
     labels = [b.text for row in ui.reply_keyboard().keyboard for b in row]

@@ -1,6 +1,16 @@
-"""SQLite storage. One file, no server. The website can reuse the same schema later."""
+"""SQLite storage shared by the bot and the website (two processes, one file).
+
+Safety across processes: WAL mode + busy_timeout, and every write runs in a
+BEGIN IMMEDIATE transaction that re-checks balances/positions *inside* the
+transaction, so two processes can never overspend or double-sell.
+"""
 import sqlite3
 import time
+from contextlib import contextmanager
+
+
+class DBConflict(Exception):
+    """A write was refused because the data changed (e.g. not enough balance, position already closed)."""
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users(
@@ -16,20 +26,46 @@ CREATE TABLE IF NOT EXISTS trades(
   id INTEGER PRIMARY KEY, tg_id INTEGER NOT NULL, position_id INTEGER, mint TEXT, symbol TEXT,
   side TEXT, sol REAL, tokens REAL, fee_sol REAL, impact_pct REAL, naive REAL,
   pnl_sol REAL, ts REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS login_nonces(nonce TEXT PRIMARY KEY, used_at REAL NOT NULL);
 """
 
 
 class DB:
     def __init__(self, path: str = ":memory:"):
-        self.c = sqlite3.connect(path, check_same_thread=False)
+        # isolation_level=None: we control transactions ourselves (see tx()).
+        self.c = sqlite3.connect(path, check_same_thread=False, isolation_level=None, timeout=10)
         self.c.row_factory = sqlite3.Row
+        self.c.execute("PRAGMA busy_timeout=10000")
+        if path != ":memory:":
+            self.c.execute("PRAGMA journal_mode=WAL")
         self.c.executescript(SCHEMA)
         self._migrate()
+
+    @contextmanager
+    def tx(self):
+        """Write transaction that takes the DB write lock up front (safe across processes)."""
+        self.c.execute("BEGIN IMMEDIATE")
+        try:
+            yield
+        except BaseException:
+            self.c.execute("ROLLBACK")
+            raise
+        self.c.execute("COMMIT")
+
+    def use_nonce(self, nonce: str) -> bool:
+        """Mark a one-time login nonce as used. False if it was already used."""
+        try:
+            with self.tx():
+                self.c.execute("DELETE FROM login_nonces WHERE used_at < ?", (time.time() - 86400,))
+                self.c.execute("INSERT INTO login_nonces VALUES(?,?)", (nonce, time.time()))
+            return True
+        except sqlite3.IntegrityError:
+            return False
 
     def _migrate(self):
         cols = {r["name"] for r in self.c.execute("PRAGMA table_info(users)")}
         if "reset_count" not in cols:
-            with self.c:
+            with self.tx():
                 self.c.execute("ALTER TABLE users ADD COLUMN reset_count INTEGER NOT NULL DEFAULT 0")
                 # existing users who already reset at least once (exact older count is unknown)
                 self.c.execute("UPDATE users SET reset_count=1 WHERE last_reset IS NOT NULL")
@@ -59,9 +95,11 @@ class DB:
 
     def record_buy(self, tg_id, mint, symbol, fill, now=None):
         now = now or time.time()
-        with self.c:
+        with self.tx():
             cost = fill.sol + fill.priority_fee  # swap fee is already inside fill.sol
-            self.c.execute("UPDATE users SET balance=balance-? WHERE tg_id=?", (cost, tg_id))
+            cur = self.c.execute("UPDATE users SET balance=balance-? WHERE tg_id=? AND balance>=?", (cost, tg_id, cost))
+            if cur.rowcount != 1:
+                raise DBConflict("Not enough paper SOL.")
             pos = self.open_position(tg_id, mint)
             if pos:
                 self.c.execute("UPDATE positions SET tokens=tokens+?, cost_sol=cost_sol+? WHERE id=?",
@@ -76,10 +114,16 @@ class DB:
     def record_sell(self, pos, fill, now=None) -> float:
         """Reduce position by fill.tokens; returns realized PnL of this sell (SOL)."""
         now = now or time.time()
-        frac = min(1.0, fill.tokens / pos["tokens"])
-        cost_part = pos["cost_sol"] * frac
-        pnl_sol = fill.sol - cost_part
-        with self.c:
+        with self.tx():
+            pos = self.c.execute("SELECT * FROM positions WHERE id=? AND status='open'", (pos["id"],)).fetchone()
+            if not pos or pos["tokens"] <= 0:
+                raise DBConflict("That position is already closed.")
+            if fill.tokens > pos["tokens"]:  # position shrank meanwhile (other process): scale the fill down
+                k = pos["tokens"] / fill.tokens
+                fill.tokens, fill.sol = pos["tokens"], fill.sol * k
+            frac = min(1.0, fill.tokens / pos["tokens"])
+            cost_part = pos["cost_sol"] * frac
+            pnl_sol = fill.sol - cost_part
             self.c.execute("UPDATE users SET balance=balance+? WHERE tg_id=?", (fill.sol, pos["tg_id"]))
             if frac >= 0.999999:
                 self.c.execute("UPDATE positions SET tokens=0, cost_sol=0, status='closed', closed_at=?,"
@@ -124,10 +168,11 @@ class DB:
 
     def reset(self, tg_id, balance, now=None):
         now = now or time.time()
-        with self.c:
+        with self.tx():
             self.c.execute("UPDATE positions SET status='reset', closed_at=? WHERE tg_id=? AND status='open'",
                            (now, tg_id))
-            self.c.execute("UPDATE users SET balance=?, last_reset=?, reset_count=reset_count+1 WHERE tg_id=?", (balance, now, tg_id))
+            self.c.execute("UPDATE users SET balance=?, last_reset=?, reset_count=reset_count+1 WHERE tg_id=?",
+                           (balance, now, tg_id))
 
     def leaderboard(self, limit=10):
         return self.c.execute(

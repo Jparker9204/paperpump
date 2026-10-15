@@ -1,0 +1,168 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>PaperPump · Trade</title>
+<link rel="stylesheet" href="/static/app.css"></head><body>
+<main class="wrap">
+  <form class="search full" id="searchForm">
+    <input id="mint" placeholder="Paste a Solana contract address (e.g. from DexScreener or pump.fun)" autocomplete="off">
+    <button class="btn primary">Load</button>
+  </form>
+
+  <div class="card pad full th" id="header"><span class="mu">Paste a contract address above to load a coin.</span></div>
+
+  <div class="card chart" id="chart"><div class="empty">The live chart will appear here.</div></div>
+
+  <div class="card pad" id="panel" style="grid-row:span 2">
+    <div class="tabs"><button id="tabBuy" class="on buy">Buy</button><button id="tabSell" class="sell">Sell</button></div>
+    <div id="buyBox">
+      <label>Amount (SOL)</label><input id="amount" type="number" step="0.01" min="0" value="0.5">
+      <div class="q"></div>
+    </div>
+    <div id="sellBox" style="display:none">
+      <label>Sell percent of position</label>
+      <div class="q" id="pctBtns"></div><div class="mu" id="posInfo" style="margin-top:8px"></div>
+    </div>
+    <div class="est" id="est"><div class="mu">Load a coin to see a realistic fill preview.</div></div>
+    <button class="btn green" id="go" style="width:100%;margin-top:12px;padding:12px" disabled>Paper Buy</button>
+    <label style="margin-top:16px">Auto-sell for this coin (after buying)</label>
+    <div class="row"><span>Take profit</span><span id="tpBtns"></span></div>
+    <div class="row"><span>Stop loss</span><span id="slBtns"></span></div>
+  </div>
+
+  <div class="card full">
+    <div class="pad" style="display:flex;justify-content:space-between"><h2>Open positions</h2><span class="mu" id="upd"></span></div>
+    <div class="scroll"><table id="pos"></table></div>
+  </div>
+</main>
+<script src="/static/app.js"></script>
+<script>
+nav("Trade");
+let token = null, side = "buy", pct = 100, positions = [];
+
+// quick amount buttons
+$("#buyBox .q").innerHTML = ["0.1", "0.25", "0.5", "1"].map((a) => `<button class="btn sm" data-a="${a}">${a}</button>`).join("");
+$("#buyBox .q").onclick = (e) => { if (e.target.dataset.a) { $("#amount").value = e.target.dataset.a; preview(); } };
+$("#pctBtns").innerHTML = [25, 50, 100].map((p) => `<button class="btn sm ${p === 100 ? "on" : ""}" data-p="${p}">${p}%</button>`).join("");
+$("#pctBtns").onclick = (e) => {
+  if (!e.target.dataset.p) return;
+  pct = +e.target.dataset.p;
+  document.querySelectorAll("#pctBtns button").forEach((b) => b.classList.toggle("on", +b.dataset.p === pct));
+  preview();
+};
+$("#amount").oninput = () => { clearTimeout(window._pv); window._pv = setTimeout(preview, 300); };
+$("#tabBuy").onclick = () => setSide("buy");
+$("#tabSell").onclick = () => setSide("sell");
+$("#tpBtns").innerHTML = [25, 50, 100].map((p) => `<button class="btn sm" data-k="tp" data-v="${p}">+${p}%</button>`).join(" ");
+$("#slBtns").innerHTML = [10, 20, 30].map((p) => `<button class="btn sm" data-k="sl" data-v="${p}">-${p}%</button>`).join(" ");
+$("#panel").addEventListener("click", async (e) => {
+  const k = e.target.dataset.k; if (!k) return;
+  const p = token && positions.find((x) => x.mint === token.mint);
+  if (!p) return toast("Buy this coin first, then set take profit / stop loss.");
+  try { await api("/api/tpsl", { position_id: p.id, [k]: +e.target.dataset.v }); toast(`${k.toUpperCase()} set at ${k === "tp" ? "+" : "-"}${e.target.dataset.v}%`); loadPositions(); }
+  catch (err) { toast("❌ " + esc(err.message)); }
+});
+
+function setSide(s) {
+  side = s;
+  $("#tabBuy").className = s === "buy" ? "on buy" : "buy";
+  $("#tabSell").className = s === "sell" ? "on sell" : "sell";
+  $("#buyBox").style.display = s === "buy" ? "" : "none";
+  $("#sellBox").style.display = s === "sell" ? "" : "none";
+  $("#go").className = "btn " + (s === "buy" ? "green" : "red");
+  preview();
+}
+
+$("#searchForm").onsubmit = (e) => { e.preventDefault(); loadToken($("#mint").value.trim()); };
+
+async function loadToken(mint) {
+  if (!mint) return;
+  history.replaceState(null, "", "/?mint=" + encodeURIComponent(mint));
+  $("#header").innerHTML = `<span class="mu">Loading…</span>`;
+  try { token = await api("/api/token/" + encodeURIComponent(mint)); }
+  catch (e) { token = null; $("#header").innerHTML = `<span class="r">${esc(e.message)}</span>`; return; }
+  const t = token;
+  $("#header").innerHTML = `
+    <div class="name"><b>${esc(t.name)}</b> <span class="mu">$${esc(t.symbol)}</span><div class="mu">${esc(t.mint.slice(0, 6))}…${esc(t.mint.slice(-6))} · ${esc(t.dex)}</div></div>
+    <div class="stat"><span class="mu">Price</span><b>$${t.price_usd.toPrecision(4)}</b></div>
+    <div class="stat"><span class="mu">Market cap</span><b>${usd(t.market_cap)}</b></div>
+    <div class="stat"><span class="mu">Liquidity</span><b>${usd(t.liquidity_usd)}</b></div>
+    <div class="stat"><span class="mu">Vol 24h</span><b>${usd(t.volume_24h)}</b></div>
+    <div class="stat"><span class="mu">Holders</span><b>${t.holders ?? "n/a"}</b></div>
+    <div class="stat"><span class="mu">Age</span><b>${esc(t.age)}</b></div>
+    <a class="mu" href="${esc(t.url)}" target="_blank" rel="noopener">DexScreener ↗</a>`;
+  // LIVE chart: DexScreener's official embed for this pair
+  $("#chart").innerHTML = t.pair_address
+    ? `<iframe title="Live chart" src="https://dexscreener.com/solana/${encodeURIComponent(t.pair_address)}?embed=1&theme=dark&trades=0&info=0"></iframe>`
+    : `<div class="empty">No chart available for this coin.</div>`;
+  $("#go").disabled = false;
+  updatePosInfo(); preview();
+}
+
+async function preview() {
+  if (!token) return;
+  const amount = side === "buy" ? +$("#amount").value : pct;
+  $("#go").textContent = side === "buy" ? `Paper Buy ${amount || 0} SOL` : `Paper Sell ${pct}%`;
+  if (!amount) return;
+  try {
+    const q = await api(`/api/quote?mint=${encodeURIComponent(token.mint)}&side=${side}&amount=${amount}`);
+    const extra = side === "buy" ? (q.naive / q.tokens - 1) * 100 : (q.naive / q.sol - 1) * 100;
+    $("#est").innerHTML = `<b>Realistic fill estimate</b>
+      ${side === "buy" ? `<div class="row">Est. tokens received<b>${Math.round(q.tokens).toLocaleString()}</b></div>`
+                       : `<div class="row">Est. SOL back<b>${q.sol.toFixed(4)}</b></div>`}
+      <div class="row">Price impact<b class="${q.impact_pct > 2 ? "r" : ""}">${q.impact_pct.toFixed(2)}%</b></div>
+      <div class="row">Fees (1% + priority)<b>${q.fee_sol.toFixed(4)} SOL</b></div>
+      <div class="row">Simulated delay<b>~${q.delay_s}s (price can move)</b></div>
+      <div class="note">A naive paper tool would show ${extra.toFixed(1)}% more. PaperPump fills realistically.</div>`;
+  } catch (e) { $("#est").innerHTML = `<span class="mu">${esc(e.message)}</span>`; }
+}
+
+$("#go").onclick = async () => {
+  if (!token) return;
+  $("#go").disabled = true;
+  try {
+    if (side === "buy") {
+      const r = await api("/api/buy", { mint: token.mint, sol: +$("#amount").value });
+      toast(`🟢 Bought ${Math.round(r.tokens).toLocaleString()} $${esc(r.symbol)} for ${r.sol} SOL · impact ${r.impact_pct.toFixed(2)}%`);
+    } else {
+      const p = positions.find((x) => x.mint === token.mint);
+      if (!p) throw new Error("You don't hold this coin.");
+      const r = await api("/api/sell", { position_id: p.id, percent: pct });
+      toast(`${r.pnl_sol >= 0 ? "🟢" : "🔴"} Sold ${r.percent}% of $${esc(r.symbol)}<br>Put in ${r.put_in.toFixed(2)} SOL · Got back ${r.got_back.toFixed(2)} SOL<br>PnL ${signed(r.pnl_sol, 2)} SOL (${signed(r.pnl_pct, 1)}%)`, 6000);
+    }
+    refreshBalance(); await loadPositions(); preview();
+  } catch (e) { toast("❌ " + esc(e.message)); }
+  $("#go").disabled = false;
+};
+
+function updatePosInfo() {
+  const p = token && positions.find((x) => x.mint === token.mint);
+  $("#posInfo").textContent = p ? `You hold ${Math.round(p.tokens).toLocaleString()} $${p.symbol} (cost ${p.cost_sol.toFixed(3)} SOL)` : "You don't hold this coin yet.";
+}
+
+async function loadPositions() {
+  try { positions = (await api("/api/portfolio")).positions; } catch (e) { return; }
+  $("#pos").innerHTML = `<tr><th>Coin</th><th>Cost</th><th>Value</th><th>PnL</th><th>MC</th><th>TP / SL</th><th></th></tr>` +
+    (positions.map((p) => `<tr>
+      <td><a href="/?mint=${encodeURIComponent(p.mint)}">$${esc(p.symbol)}</a></td><td>${sol(p.cost_sol)} SOL</td>
+      <td>${sol(p.value_sol)} SOL</td>
+      <td class="${p.pnl_sol === null ? "" : cls(p.pnl_sol)}">${p.pnl_sol === null ? "n/a" : `${signed(p.pnl_sol)} SOL (${signed(p.pnl_pct, 1)}%)`}</td>
+      <td>${p.market ? usd(p.market.market_cap) : "–"}</td>
+      <td>${p.tp_pct ? "+" + p.tp_pct + "%" : "off"} / ${p.sl_pct ? "-" + p.sl_pct + "%" : "off"}</td>
+      <td>${[25, 50, 100].map((x) => `<button class="btn sm" onclick="quickSell(${p.id},${x})">Sell ${x}%</button>`).join(" ")}</td></tr>`).join("")
+     || `<tr><td class="mu" colspan="7">No open positions yet.</td></tr>`);
+  $("#upd").textContent = "Updated " + new Date().toLocaleTimeString();
+  updatePosInfo();
+}
+
+async function quickSell(id, p) {
+  try {
+    const r = await api("/api/sell", { position_id: id, percent: p });
+    toast(`${r.pnl_sol >= 0 ? "🟢" : "🔴"} Sold ${r.percent}% of $${esc(r.symbol)} · PnL ${signed(r.pnl_sol, 2)} SOL (${signed(r.pnl_pct, 1)}%)`, 6000);
+    refreshBalance(); loadPositions();
+  } catch (e) { toast("❌ " + esc(e.message)); }
+}
+
+loadPositions();
+setInterval(loadPositions, 10000); // auto-refresh every 10s
+const m = new URLSearchParams(location.search).get("mint");
+if (m) { $("#mint").value = m; loadToken(m); }
+</script></body></html>

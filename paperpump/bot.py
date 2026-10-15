@@ -8,7 +8,7 @@ from telegram.constants import ParseMode
 from telegram.error import BadRequest, TelegramError
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
-from . import config, ui
+from . import auth, config, ui
 from .db import DB
 from .prices import DexScreener
 from .service import MINT_RE, TradeError, Trader, buy_text, leaderboard_text, portfolio_text, sell_text
@@ -89,8 +89,19 @@ async def show_help(update, ctx, edit=False):
     await send(update, ui.HELP_TEXT, ui.back_kb(), edit)
 
 
+async def show_web(update, ctx, edit=False):
+    u, cfg = ensure_user(update, ctx), T(ctx).cfg
+    if not (cfg.base_url and cfg.session_secret):
+        return await send(update, "The website isn't available right now.", ui.back_kb(), edit)
+    url = auth.login_url(cfg.base_url, cfg.session_secret, u["tg_id"])
+    # Always a new message (never edited into an old one) so the link is easy to find. Valid 10 min, one use.
+    await send(update, "🌐 Your personal login link is below.\nIt works once and expires in 10 minutes. "
+               "Don't share it.", ui.web_link_kb(url))
+
+
 SCREENS = {"menu": show_menu, "pf": show_portfolio, "st": show_stats, "hi": show_history,
-           "lb": show_leaderboard, "rs": show_reset, "hp": show_help}
+           "lb": show_leaderboard, "rs": show_reset, "hp": show_help,
+           "web": show_web}
 
 
 # ---------- actions ----------

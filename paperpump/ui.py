@@ -10,6 +10,7 @@ MENU_LABELS = {PORTFOLIO: "pf", STATS: "st", HISTORY: "hi", LEADERBOARD: "lb", R
 BUY_AMOUNTS = ("0.1", "0.25", "0.5", "1")
 TP_PRESETS = (25, 50, 100)
 SL_PRESETS = (10, 20, 30)
+WEB = "🌐 Open website"
 NUDGE = "Paste a contract address or tap a button below."
 
 HELP_TEXT = (
@@ -44,7 +45,12 @@ def menu_kb() -> InlineKeyboardMarkup:
         [B(PORTFOLIO, callback_data="m|pf"), B(STATS, callback_data="m|st")],
         [B(HISTORY, callback_data="m|hi"), B(LEADERBOARD, callback_data="m|lb")],
         [B(RESET, callback_data="m|rs"), B(HELP, callback_data="m|hp")],
+        [B(WEB, callback_data="m|web")],
     ])
+
+
+def web_link_kb(url: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[B("🌐 Open PaperPump website", url=url)], back_row()])
 
 
 def back_kb() -> InlineKeyboardMarkup:

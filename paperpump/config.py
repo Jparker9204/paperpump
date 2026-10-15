@@ -14,12 +14,15 @@ class Config:
     delay_seconds: float = 1.5
     reset_cooldown_hours: float = 24.0
     tpsl_interval: float = 30.0
+    base_url: str = ""
+    session_secret: str = ""
+    site_password: str = ""
 
 
-def load() -> Config:
+def load(require_token: bool = True) -> Config:
     load_dotenv()
     token = os.getenv("TELEGRAM_BOT_TOKEN", "")
-    if not token:
+    if require_token and not token:
         raise SystemExit("TELEGRAM_BOT_TOKEN missing. Copy .env.example to .env and fill it in.")
     f = lambda k, d: float(os.getenv(k, d))  # noqa: E731
     return Config(
@@ -31,4 +34,7 @@ def load() -> Config:
         delay_seconds=f("SIM_DELAY_SECONDS", 1.5),
         reset_cooldown_hours=f("RESET_COOLDOWN_HOURS", 24),
         tpsl_interval=f("TPSL_CHECK_SECONDS", 30),
+        base_url=os.getenv("BASE_URL", "").rstrip("/"),
+        session_secret=os.getenv("SESSION_SECRET", ""),
+        site_password=os.getenv("SITE_PASSWORD", ""),
     )
