@@ -16,17 +16,45 @@ class TradeError(Exception):
 class Trader:
     def __init__(self, db: DB, prices, cfg, sleep=asyncio.sleep):
         self.db, self.prices, self.cfg, self.sleep = db, prices, cfg, sleep
+        self._locks: dict[int, asyncio.Lock] = {}
+
+    def lock(self, tg_id) -> asyncio.Lock:
+        """One trade at a time per user (updates run concurrently, so double taps can't overspend)."""
+        return self._locks.setdefault(tg_id, asyncio.Lock())
+
+    async def _q(self, mint, fresh=False):
+        try:
+            return await asyncio.wait_for(self.prices.quote(mint, **({"max_age": 0} if fresh else {})), 8)
+        except TradeError:
+            raise
+        except Exception as e:
+            raise TradeError("Price service is slow or unavailable right now. Try again.") from e
 
     async def _quotes(self, mint):
-        q = await self.prices.quote(mint)
+        q = await self._q(mint)
         if not q:
             raise TradeError("No Solana/SOL pair found on DexScreener for that mint.")
-        sol_usd = await self.prices.sol_usd()
-        await self.sleep(self.cfg.delay_seconds)  # simulated landing delay
-        q2 = await self.prices.quote(mint) or q
+        try:
+            sol_usd = await asyncio.wait_for(self.prices.sol_usd(), 8)
+        except Exception as e:
+            raise TradeError("Price service is slow or unavailable right now. Try again.") from e
+        await self.sleep(self.cfg.delay_seconds)  # simulated landing delay (asyncio.sleep: non-blocking)
+        q2 = await self._q(mint, fresh=True) or q
         return q, q2, sol_usd
 
     async def buy(self, tg_id, mint, sol):
+        async with self.lock(tg_id):
+            return await self._buy(tg_id, mint, sol)
+
+    async def sell(self, tg_id, mint, percent, pos=None):
+        async with self.lock(tg_id):
+            if pos is not None:  # re-read: it may have changed while we waited for the lock
+                pos = self.db.position(pos["id"], tg_id)
+                if not pos:
+                    raise TradeError("That position is already closed.")
+            return await self._sell(tg_id, mint, percent, pos)
+
+    async def _buy(self, tg_id, mint, sol):
         if not MINT_RE.match(mint):
             raise TradeError("That doesn't look like a Solana mint address.")
         u = self.db.user(tg_id)
@@ -40,7 +68,7 @@ class Trader:
         self.db.record_buy(tg_id, mint, q.symbol, f)
         return q2, f, sol_usd
 
-    async def sell(self, tg_id, mint, percent, pos=None):
+    async def _sell(self, tg_id, mint, percent, pos=None):
         pos = pos or self.db.open_position(tg_id, mint)
         if not pos:
             raise TradeError("No open position in that token.")
@@ -67,17 +95,22 @@ class Trader:
     async def check_tpsl(self):
         """Close positions whose TP or SL hit. Returns list of (tg_id, symbol, reason, realized)."""
         hits = []
-        for pos in self.db.open_positions():
-            if pos["tp_pct"] is None and pos["sl_pct"] is None:
-                continue
-            q = await self.prices.quote(pos["mint"])
+        watched = [p for p in self.db.open_positions() if p["tp_pct"] is not None or p["sl_pct"] is not None]
+        mints = list({p["mint"] for p in watched})
+        res = await asyncio.gather(*(self._q(m) for m in mints), return_exceptions=True)
+        quotes = {m: r for m, r in zip(mints, res, strict=True) if not isinstance(r, BaseException)}
+        for pos in watched:
+            q = quotes.get(pos["mint"])
             if not q or pos["cost_sol"] <= 0:
                 continue
             _, pct = fm.pnl(pos["cost_sol"], pos["tokens"] * q.price_sol)
             reason = ("TP" if pos["tp_pct"] is not None and pct >= pos["tp_pct"] else
                       "SL" if pos["sl_pct"] is not None and pct <= -abs(pos["sl_pct"]) else None)
             if reason:
-                _, _, _, realized = await self.sell(pos["tg_id"], pos["mint"], 100, pos)
+                try:
+                    _, _, _, realized = await self.sell(pos["tg_id"], pos["mint"], 100, pos)
+                except TradeError:
+                    continue
                 hits.append((pos["tg_id"], pos["symbol"], reason, realized))
         return hits
 

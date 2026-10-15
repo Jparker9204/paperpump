@@ -49,13 +49,20 @@ def parse_pairs(mint: str, data) -> Quote | None:
 
 class DexScreener:
     def __init__(self, client: httpx.AsyncClient | None = None):
-        self.client = client or httpx.AsyncClient(timeout=10)
+        self.client = client or httpx.AsyncClient(timeout=httpx.Timeout(6.0, connect=3.0))
         self._sol = (0.0, 0.0)
+        self._cache: dict[str, tuple[float, Quote | None]] = {}
 
-    async def quote(self, mint: str) -> Quote | None:
+    async def quote(self, mint: str, max_age: float = 3.0) -> Quote | None:
+        """Latest quote; reuses one younger than max_age seconds (pass 0 to force a fresh one)."""
+        hit = self._cache.get(mint)
+        if hit and time.time() - hit[0] < max_age:
+            return hit[1]
         r = await self.client.get(f"{DEX}/token-pairs/v1/solana/{mint}")
         r.raise_for_status()
-        return parse_pairs(mint, r.json())
+        q = parse_pairs(mint, r.json())
+        self._cache[mint] = (time.time(), q)
+        return q
 
     async def sol_usd(self) -> float:
         if time.time() - self._sol[1] < 60:

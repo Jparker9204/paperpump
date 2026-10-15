@@ -17,7 +17,7 @@ class FakePrices:
     def __init__(self, price=1e-6, liq=20000):
         self.price, self.liq = price, liq
 
-    async def quote(self, mint):
+    async def quote(self, mint, max_age=3.0):
         return Quote(mint, "Demo", "DEMO", self.price * 150, self.price, self.liq, 50000, None, "pumpswap", "")
 
     async def sol_usd(self):

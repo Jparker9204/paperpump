@@ -1,9 +1,11 @@
 """Telegram bot entry point: python -m paperpump.bot"""
+import asyncio
 import logging
+import time
 
 from telegram import BotCommand, Update
 from telegram.constants import ParseMode
-from telegram.error import BadRequest
+from telegram.error import BadRequest, TelegramError
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
 from . import config, ui
@@ -48,11 +50,15 @@ async def show_menu(update, ctx, edit=False):
 
 async def show_portfolio(update, ctx, edit=False):
     tr, u = T(ctx), ensure_user(update, ctx)
-    sol_usd = await tr.prices.sol_usd()
+    try:
+        sol_usd = await asyncio.wait_for(tr.prices.sol_usd(), 8)
+    except Exception:
+        sol_usd = 0.0
     lines = [f"💼 <b>Portfolio</b>\nBalance: <b>{u['balance']:.3f} SOL</b> (${u['balance'] * sol_usd:,.0f})"]
     positions = tr.db.open_positions(u["tg_id"])
-    for i, p in enumerate(positions, 1):
-        q = await tr.prices.quote(p["mint"])
+    res = await asyncio.gather(*(tr._q(p["mint"]) for p in positions), return_exceptions=True)
+    for i, (p, q) in enumerate(zip(positions, res, strict=True), 1):
+        q = None if isinstance(q, BaseException) else q
         val = p["tokens"] * q.price_sol if q else 0
         d, pct = pnl(p["cost_sol"], val)
         tp = f"+{p['tp_pct']:g}%" if p["tp_pct"] else "off"
@@ -114,7 +120,10 @@ async def do_buy(update, ctx, mint, sol):
 
 
 async def token_card(update, ctx, mint):
-    q = await T(ctx).prices.quote(mint)
+    try:
+        q = await T(ctx)._q(mint)
+    except TradeError as e:
+        return await send(update, f"❌ {ui.esc(e)}", ui.back_kb())
     if not q:
         return await send(update, "Couldn't find that coin on DexScreener (it may be too new). Try again in a minute.",
                           ui.back_kb())
@@ -143,21 +152,22 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
-    parts = q.data.split("|")
+    parts = (q.data or "").split("|")
     kind = parts[0]
+    # Answer right away (Telegram only accepts answers for ~15s, and it stops the button spinner).
+    try:
+        await q.answer("Simulating fill…" if kind in ("b", "s") else None)
+    except TelegramError as e:
+        log.warning("answer_callback_query failed: %s", e)
     tr, uid = T(ctx), update.effective_user.id
     if kind == "m":
-        await q.answer()
         return await SCREENS.get(parts[1], show_menu)(update, ctx, edit=True)
     if kind == "b":
-        await q.answer("Simulating fill…")
         return await do_buy(update, ctx, parts[2], float(parts[1]))
     if kind == "c":
-        await q.answer()
         ctx.user_data["custom_mint"] = parts[1]
         return await send(update, "✏️ How much SOL do you want to spend? Type a number, like <b>0.3</b>.", ui.back_kb())
     if kind == "rs":
-        await q.answer()
         try:
             tr.reset(uid)
             return await show_menu(update, ctx, edit=True)
@@ -165,10 +175,8 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             return await send(update, f"❌ {ui.esc(e)}", ui.back_kb(), edit=True)
     pos = tr.db.position(int(parts[1]), uid)
     if not pos:
-        await q.answer("That position is already closed.")
         return await show_portfolio(update, ctx, edit=True)
     if kind == "s":
-        await q.answer("Simulating fill…")
         try:
             _, f, sol_usd, realized = await tr.sell(uid, pos["mint"], float(parts[2]), pos)
             await send(update, fill_text(f, ui.esc(pos["symbol"]), sol_usd) + f"\nRealized PnL: <b>{realized:+.4f} SOL</b>",
@@ -176,7 +184,6 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         except TradeError as e:
             await send(update, f"❌ {ui.esc(e)}", ui.back_kb(), edit=True)
     elif kind in ("tpm", "slm"):
-        await q.answer()
         k = kind[:2]
         what = "Take profit: auto-sell when you're up" if k == "tp" else "Stop loss: auto-sell when you're down"
         await send(update, f"🎯 <b>${ui.esc(pos['symbol'])}</b>\n{what}…", ui.tpsl_kb(k, pos["id"]), edit=True)
@@ -186,14 +193,15 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             tr.db.set_tpsl(pos["id"], **{kind: pct})
         else:
             tr.db.clear_tpsl(pos["id"], kind)
-        await q.answer(f"{kind.upper()} {'set' if pct else 'cleared'}")
         await show_portfolio(update, ctx, edit=True)
 
 
 # ---------- slash commands (kept for power users, not advertised) ----------
 async def cmd_start(update, ctx):
     ensure_user(update, ctx)
-    await update.effective_message.reply_text("👋", reply_markup=ui.reply_keyboard())
+    # Sets the always-visible bottom keyboard. Not emoji-only (Telegram renders those huge).
+    await update.effective_message.reply_text("Your quick buttons are at the bottom of the chat.",
+                                              reply_markup=ui.reply_keyboard())
     await show_menu(update, ctx)
 
 
@@ -241,7 +249,28 @@ async def tpsl_job(ctx: ContextTypes.DEFAULT_TYPE):
         log.exception("tp/sl check failed")
 
 
+async def on_error(update, ctx: ContextTypes.DEFAULT_TYPE):
+    log.error("handler error", exc_info=ctx.error)
+    if isinstance(update, Update) and update.effective_chat:
+        try:
+            await ctx.bot.send_message(update.effective_chat.id, "Something went wrong, try again.",
+                                       reply_markup=ui.back_kb())
+        except TelegramError:
+            pass
+
+
+async def loop_watchdog():
+    """Logs a warning if something blocks the event loop (helps catch freezes)."""
+    while True:
+        t = time.monotonic()
+        await asyncio.sleep(1)
+        lag = time.monotonic() - t - 1
+        if lag > 0.5:
+            log.warning("event loop was blocked for %.1fs", lag)
+
+
 async def post_init(app: Application):
+    app.create_task(loop_watchdog())
     await app.bot.set_my_commands([BotCommand("start", "Open PaperPump"), BotCommand("menu", "Main menu"),
                                    BotCommand("help", "How it works")])
 
@@ -250,7 +279,7 @@ def main():
     logging.basicConfig(level=logging.INFO)
     logging.getLogger("httpx").setLevel(logging.WARNING)  # keeps the bot token out of logs
     cfg = config.load()
-    app = Application.builder().token(cfg.token).post_init(post_init).build()
+    app = Application.builder().token(cfg.token).post_init(post_init).concurrent_updates(True).build()
     app.bot_data["trader"] = Trader(DB(cfg.db_path), DexScreener(), cfg)
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("menu", lambda u, c: show_menu(u, c)))
@@ -262,8 +291,9 @@ def main():
         app.add_handler(CommandHandler(name, lambda u, c, k=key: SCREENS[k](u, c)))
     app.add_handler(CallbackQueryHandler(on_button))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
+    app.add_error_handler(on_error)
     app.job_queue.run_repeating(tpsl_job, interval=cfg.tpsl_interval, first=10)
-    app.run_polling()
+    app.run_polling(drop_pending_updates=False)
 
 
 if __name__ == "__main__":
