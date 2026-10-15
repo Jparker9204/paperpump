@@ -184,3 +184,16 @@ def portfolio_text(balance: float, sol_usd: float, positions, quotes) -> tuple[s
     elif len(shown) > 1:
         lines.append("\n<i>Buttons below are in the same order as the list.</i>")
     return "\n".join(lines), shown
+
+
+def leaderboard_text(rows) -> str:
+    """Ranking is by realized PnL since each user's last reset; win rate and resets are display-only."""
+    from html import escape
+    medals = ["🥇", "🥈", "🥉"]
+    out = []
+    for i, r in enumerate(rows):
+        n = r["n"]
+        win = f"Win {r['wins'] / n * 100:.0f}% ({n} trade{'s' if n != 1 else ''})" if n else "No closed trades"
+        out.append(f"{medals[i] if i < 3 else f'{i + 1}.'} {escape(r['username'] or 'anon')}  "
+                   f"{r['pnl']:+.1f} SOL · {win} · Resets {r['resets']}")
+    return "🏆 <b>Leaderboard</b> (profit from closed trades since last reset)\n" + ("\n".join(out) or "Empty")

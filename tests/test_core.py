@@ -200,3 +200,35 @@ def test_portfolio_text_stays_under_telegram_limit():
     positions = [_pos(i, "X" * 30) for i in range(200)]
     text, shown = portfolio_text(10, 150, positions, [q] * 200)
     assert len(text) < 4096 and 0 < len(shown) < 200 and "more" in text
+
+
+def test_leaderboard_winrate_and_resets():
+    from paperpump.service import leaderboard_text
+    db, t = make()
+    t.reset(1, now=1000)
+    t.reset(1, now=1000 + 25 * 3600)
+    for price in (3e-6, 0.5e-6, 2e-6):  # win, loss, win
+        t.prices.price = 1e-6
+        run(t.buy(1, MINT, 1))
+        t.prices.price = price
+        run(t.sell(1, MINT, 100))
+    r = db.leaderboard()[0]
+    assert (r["n"], r["wins"], r["resets"]) == (3, 2, 2)
+    line = leaderboard_text(db.leaderboard()).splitlines()[1]
+    assert line.startswith("🥇 alice  +") and "Win 67% (3 trades) · Resets 2" in line
+
+
+def test_migration_keeps_old_rows(tmp_path):
+    import sqlite3
+    path = tmp_path / "old.db"
+    c = sqlite3.connect(path)
+    c.executescript("CREATE TABLE users(tg_id INTEGER PRIMARY KEY, username TEXT, balance REAL NOT NULL,"
+                    " created_at REAL NOT NULL, last_reset REAL);"
+                    "INSERT INTO users VALUES(1,'old',50,0,NULL),(2,'reset_before',100,0,123);")
+    c.commit()
+    c.close()
+    db = DB(str(path))
+    assert db.user(1)["reset_count"] == 0 and db.user(2)["reset_count"] == 1
+    assert db.user(1)["balance"] == 50
+    DB(str(path))  # running the migration twice is harmless
+    assert db.create_user(3, "new", 100)

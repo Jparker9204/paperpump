@@ -11,7 +11,7 @@ from telegram.ext import Application, CallbackQueryHandler, CommandHandler, Cont
 from . import config, ui
 from .db import DB
 from .prices import DexScreener
-from .service import MINT_RE, TradeError, Trader, buy_text, portfolio_text, sell_text
+from .service import MINT_RE, TradeError, Trader, buy_text, leaderboard_text, portfolio_text, sell_text
 
 log = logging.getLogger("paperpump")
 
@@ -75,12 +75,8 @@ async def show_history(update, ctx, edit=False):
 
 
 async def show_leaderboard(update, ctx, edit=False):
-    rows = T(ctx).db.leaderboard()
-    medals = ["🥇", "🥈", "🥉"]
-    out = [f"{medals[i] if i < 3 else f'{i + 1}.'} {ui.esc(r['username'] or 'anon')}: {r['pnl']:+.3f} SOL"
-           for i, r in enumerate(rows)]
-    await send(update, "🏆 <b>Leaderboard</b> (profit from closed trades)\n" + ("\n".join(out) or "Empty"),
-               ui.back_kb(), edit)
+    text = leaderboard_text(T(ctx).db.leaderboard())
+    await send(update, text, ui.back_kb(), edit)
 
 
 async def show_reset(update, ctx, edit=False):

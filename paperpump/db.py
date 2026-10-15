@@ -24,12 +24,21 @@ class DB:
         self.c = sqlite3.connect(path, check_same_thread=False)
         self.c.row_factory = sqlite3.Row
         self.c.executescript(SCHEMA)
+        self._migrate()
+
+    def _migrate(self):
+        cols = {r["name"] for r in self.c.execute("PRAGMA table_info(users)")}
+        if "reset_count" not in cols:
+            with self.c:
+                self.c.execute("ALTER TABLE users ADD COLUMN reset_count INTEGER NOT NULL DEFAULT 0")
+                # existing users who already reset at least once (exact older count is unknown)
+                self.c.execute("UPDATE users SET reset_count=1 WHERE last_reset IS NOT NULL")
 
     def user(self, tg_id):
         return self.c.execute("SELECT * FROM users WHERE tg_id=?", (tg_id,)).fetchone()
 
     def create_user(self, tg_id, username, balance) -> bool:
-        cur = self.c.execute("INSERT OR IGNORE INTO users VALUES(?,?,?,?,NULL)",
+        cur = self.c.execute("INSERT OR IGNORE INTO users(tg_id,username,balance,created_at) VALUES(?,?,?,?)",
                              (tg_id, username, balance, time.time()))
         self.c.commit()
         return cur.rowcount == 1
@@ -118,11 +127,12 @@ class DB:
         with self.c:
             self.c.execute("UPDATE positions SET status='reset', closed_at=? WHERE tg_id=? AND status='open'",
                            (now, tg_id))
-            self.c.execute("UPDATE users SET balance=?, last_reset=? WHERE tg_id=?", (balance, now, tg_id))
+            self.c.execute("UPDATE users SET balance=?, last_reset=?, reset_count=reset_count+1 WHERE tg_id=?", (balance, now, tg_id))
 
     def leaderboard(self, limit=10):
         return self.c.execute(
-            "SELECT u.tg_id, u.username, COALESCE(SUM(p.realized_sol),0) AS pnl, COUNT(p.id) AS n"
+            "SELECT u.tg_id, u.username, COALESCE(SUM(p.realized_sol),0) AS pnl, COUNT(p.id) AS n,"
+            " COALESCE(SUM(p.realized_sol > 0),0) AS wins, u.reset_count AS resets"
             " FROM users u LEFT JOIN positions p ON p.tg_id=u.tg_id AND p.status='closed'"
             " AND p.closed_at > COALESCE(u.last_reset,0)"
             " GROUP BY u.tg_id ORDER BY pnl DESC LIMIT ?", (limit,)).fetchall()
