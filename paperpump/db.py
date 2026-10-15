@@ -38,6 +38,10 @@ class DB:
         return self.c.execute("SELECT * FROM positions WHERE tg_id=? AND mint=? AND status='open'",
                               (tg_id, mint)).fetchone()
 
+    def position(self, pos_id, tg_id):
+        return self.c.execute("SELECT * FROM positions WHERE id=? AND tg_id=? AND status='open'",
+                              (pos_id, tg_id)).fetchone()
+
     def open_positions(self, tg_id=None):
         if tg_id is None:
             return self.c.execute("SELECT * FROM positions WHERE status='open'").fetchall()
@@ -89,6 +93,11 @@ class DB:
             self.c.execute("UPDATE positions SET tp_pct=? WHERE id=?", (tp, pos_id))
         if sl is not None:
             self.c.execute("UPDATE positions SET sl_pct=? WHERE id=?", (sl, pos_id))
+        self.c.commit()
+
+    def clear_tpsl(self, pos_id, kind):
+        col = {"tp": "tp_pct", "sl": "sl_pct"}[kind]
+        self.c.execute(f"UPDATE positions SET {col}=NULL WHERE id=?", (pos_id,))
         self.c.commit()
 
     def history(self, tg_id, limit=10):
