@@ -270,7 +270,7 @@ async def loop_watchdog():
 
 
 async def post_init(app: Application):
-    app.create_task(loop_watchdog())
+    app.bot_data["watchdog"] = asyncio.get_running_loop().create_task(loop_watchdog())
     await app.bot.set_my_commands([BotCommand("start", "Open PaperPump"), BotCommand("menu", "Main menu"),
                                    BotCommand("help", "How it works")])
 
