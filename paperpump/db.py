@@ -153,6 +153,11 @@ class DB:
         self.c.execute(f"UPDATE positions SET {col}=NULL WHERE id=?", (pos_id,))
         self.c.commit()
 
+    def sold_sol(self, pos_id) -> float:
+        """SOL received so far from sells of this position."""
+        return self.c.execute("SELECT COALESCE(SUM(sol),0) FROM trades WHERE position_id=? AND side='sell'",
+                              (pos_id,)).fetchone()[0]
+
     def history(self, tg_id, limit=10):
         return self.c.execute("SELECT * FROM trades WHERE tg_id=? ORDER BY id DESC LIMIT ?",
                               (tg_id, limit)).fetchall()

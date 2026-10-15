@@ -227,9 +227,16 @@ def create_app(cfg: config.Config, db: DB, prices, sleep=asyncio.sleep) -> FastA
             row = {"id": p["id"], "mint": p["mint"], "symbol": (p["symbol"] or "?").lstrip("$"), "tokens": p["tokens"],
                    "cost_sol": p["cost_sol"], "tp_pct": p["tp_pct"], "sl_pct": p["sl_pct"], "opened_at": p["opened_at"],
                    "value_sol": None, "pnl_sol": None, "pnl_pct": None, "market": None}
+            # Whole-position summary: bought = remaining cost + cost of the parts already sold
+            sold = db.sold_sol(p["id"])
+            bought = p["cost_sol"] + sold - p["realized_sol"]
+            row.update(realized_sol=p["realized_sol"], sold_sol=sold, bought_sol=bought,
+                       total_pnl_sol=None, total_pnl_pct=None)
             if q:
                 val = p["tokens"] * q.price_sol
                 d, pct = fm.pnl(p["cost_sol"], val)
+                total = val + sold - bought
+                row.update(total_pnl_sol=total, total_pnl_pct=total / bought * 100 if bought else 0.0)
                 row.update(value_sol=val, pnl_sol=d, pnl_pct=pct, market={
                     "market_cap": q.market_cap, "volume_24h": q.volume_24h, "liquidity_usd": q.liquidity_usd,
                     "entry_mc": q.market_cap * (p["cost_sol"] / p["tokens"]) / q.price_sol if p["tokens"] else None})

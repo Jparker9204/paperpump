@@ -193,3 +193,24 @@ def test_bot_web_button_sends_login_link():
     url = kb.inline_keyboard[0][0].url
     assert url.startswith("https://example.test/login?t=")
     assert auth.verify(SECRET, url.split("t=")[1], "login")[0] == 7
+
+
+def test_portfolio_position_summary_fields(env):
+    client, db, prices = env
+    login(client, 1)
+    client.post("/api/buy", json={"mint": MINT, "sol": 1.0})
+    pid = client.get("/api/portfolio").json()["positions"][0]["id"]
+    prices.price = 2e-6
+    sold = client.post("/api/sell", json={"position_id": pid, "percent": 50}).json()
+    p = client.get("/api/portfolio").json()["positions"][0]
+    assert p["bought_sol"] == pytest.approx(1.001)
+    assert p["sold_sol"] == pytest.approx(sold["got_back"])
+    assert p["realized_sol"] == pytest.approx(sold["pnl_sol"])
+    assert p["total_pnl_sol"] == pytest.approx(p["value_sol"] + p["sold_sol"] - p["bought_sol"])
+    assert p["total_pnl_pct"] == pytest.approx(p["total_pnl_sol"] / 1.001 * 100)
+
+
+def test_trade_page_has_no_fill_breakdown(env):
+    client, _, _ = env
+    html = client.get("/").text
+    assert "Realistic fill estimate" not in html and "No position yet" in html

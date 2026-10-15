@@ -19,9 +19,10 @@
     </div>
     <div id="sellBox" style="display:none">
       <label>Sell percent of position</label>
-      <div class="q" id="pctBtns"></div><div class="mu" id="posInfo" style="margin-top:8px"></div>
+      <div class="q" id="pctBtns"></div>
     </div>
-    <div class="est" id="est"><div class="mu">Load a coin to see a realistic fill preview.</div></div>
+    <div class="est" id="summary"><div class="mu">Load a coin to start.</div></div>
+    <div class="mu" id="hint" style="margin-top:8px;min-height:18px"></div>
     <button class="btn green" id="go" style="width:100%;margin-top:12px;padding:12px" disabled>Paper Buy</button>
     <label style="margin-top:16px">Auto-sell for this coin (after buying)</label>
     <div class="row"><span>Take profit</span><span id="tpBtns"></span></div>
@@ -94,25 +95,38 @@ async function loadToken(mint) {
     ? `<iframe title="Live chart" src="https://dexscreener.com/solana/${encodeURIComponent(t.pair_address)}?embed=1&theme=dark&trades=0&info=0"></iframe>`
     : `<div class="empty">No chart available for this coin.</div>`;
   $("#go").disabled = false;
-  updatePosInfo(); preview();
+  renderSummary(); preview();
 }
 
+// One small muted line: what you'd roughly get (fees included).
 async function preview() {
   if (!token) return;
   const amount = side === "buy" ? +$("#amount").value : pct;
   $("#go").textContent = side === "buy" ? `Paper Buy ${amount || 0} SOL` : `Paper Sell ${pct}%`;
+  $("#hint").textContent = "";
   if (!amount) return;
+  if (side === "sell" && !myPosition()) { $("#hint").textContent = "You don't hold this coin."; return; }
   try {
     const q = await api(`/api/quote?mint=${encodeURIComponent(token.mint)}&side=${side}&amount=${amount}`);
-    const extra = side === "buy" ? (q.naive / q.tokens - 1) * 100 : (q.naive / q.sol - 1) * 100;
-    $("#est").innerHTML = `<b>Realistic fill estimate</b>
-      ${side === "buy" ? `<div class="row">Est. tokens received<b>${Math.round(q.tokens).toLocaleString()}</b></div>`
-                       : `<div class="row">Est. SOL back<b>${q.sol.toFixed(4)}</b></div>`}
-      <div class="row">Price impact<b class="${q.impact_pct > 2 ? "r" : ""}">${q.impact_pct.toFixed(2)}%</b></div>
-      <div class="row">Fees (1% + priority)<b>${q.fee_sol.toFixed(4)} SOL</b></div>
-      <div class="row">Simulated delay<b>~${q.delay_s}s (price can move)</b></div>
-      <div class="note">A naive paper tool would show ${extra.toFixed(1)}% more. PaperPump fills realistically.</div>`;
-  } catch (e) { $("#est").innerHTML = `<span class="mu">${esc(e.message)}</span>`; }
+    $("#hint").textContent = side === "buy"
+      ? `You'll get ~${Math.round(q.tokens).toLocaleString()} $${token.symbol}`
+      : `~${q.sol.toFixed(3)} SOL back`;
+  } catch (e) { $("#hint").textContent = e.message; }
+}
+
+const myPosition = () => token && positions.find((x) => x.mint === token.mint);
+
+// Compact summary of your position in the loaded coin (same on Buy and Sell tabs).
+function renderSummary() {
+  if (!token) return;
+  const p = myPosition();
+  if (!p) { $("#summary").innerHTML = `<div class="mu">No position yet</div>`; return; }
+  const pnl = p.total_pnl_sol;
+  $("#summary").innerHTML = `
+    <div class="row">Bought<b>${p.bought_sol.toFixed(3)} SOL</b></div>
+    <div class="row">Holding<b>${Math.round(p.tokens).toLocaleString()} $${esc(p.symbol)} · ${sol(p.value_sol)} SOL</b></div>
+    <div class="row">Sold<b>${p.sold_sol.toFixed(3)} SOL</b></div>
+    <div class="row">PnL<b class="${pnl === null ? "" : cls(pnl)}">${pnl === null ? "n/a" : `${signed(pnl)} SOL (${signed(p.total_pnl_pct, 1)}%)`}</b></div>`;
 }
 
 $("#go").onclick = async () => {
@@ -133,11 +147,6 @@ $("#go").onclick = async () => {
   $("#go").disabled = false;
 };
 
-function updatePosInfo() {
-  const p = token && positions.find((x) => x.mint === token.mint);
-  $("#posInfo").textContent = p ? `You hold ${Math.round(p.tokens).toLocaleString()} $${p.symbol} (cost ${p.cost_sol.toFixed(3)} SOL)` : "You don't hold this coin yet.";
-}
-
 async function loadPositions() {
   try { positions = (await api("/api/portfolio")).positions; } catch (e) { return; }
   $("#pos").innerHTML = `<tr><th>Coin</th><th>Cost</th><th>Value</th><th>PnL</th><th>MC</th><th>TP / SL</th><th></th></tr>` +
@@ -150,7 +159,7 @@ async function loadPositions() {
       <td>${[25, 50, 100].map((x) => `<button class="btn sm" onclick="quickSell(${p.id},${x})">Sell ${x}%</button>`).join(" ")}</td></tr>`).join("")
      || `<tr><td class="mu" colspan="7">No open positions yet.</td></tr>`);
   $("#upd").textContent = "Updated " + new Date().toLocaleTimeString();
-  updatePosInfo();
+  renderSummary();
 }
 
 async function quickSell(id, p) {
