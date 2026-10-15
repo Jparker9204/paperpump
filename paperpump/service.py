@@ -115,24 +115,31 @@ class Trader:
         return hits
 
 
-def fill_text(f: fm.Fill, symbol: str, sol_usd: float) -> str:
-    if f.side == "buy":
-        head = f"🧪 PAPER BUY {f.sol:g} SOL → {f.tokens:,.0f} ${symbol}"
-        naive = f"Naive paper fill: {f.naive:,.0f} tokens ({(f.naive / f.tokens - 1) * 100:+.2f}% vs realistic)"
-    else:
-        head = f"🧪 PAPER SELL {f.tokens:,.0f} ${symbol} → {f.sol:.4f} SOL (${f.sol * sol_usd:,.2f})"
-        naive = f"Naive paper fill: {f.naive:.4f} SOL ({(f.naive / f.sol - 1) * 100 if f.sol > 0 else 0:+.2f}% vs realistic)"
-    return (f"{head}\n\n<b>Realistic fill</b>\n"
-            f"• Price impact: {f.impact_pct:.2f}%\n"
-            f"• Fees: {f.fee_sol:.4f} SOL (1% swap + {f.priority_fee:g} priority)\n"
-            f"• Simulated delay drift: {f.drift_pct:+.2f}%\n"
-            f"• {naive}\n<i>Paper trade, no real funds.</i>")
+def usd(v: float) -> str:
+    """Compact USD: $950, $41.2K, $1.3M, $2.1B."""
+    for div, suf in ((1e9, "B"), (1e6, "M"), (1e3, "K")):
+        if abs(v) >= div:
+            return f"${v / div:.1f}{suf}"
+    return f"${v:,.0f}"
+
+
+def buy_text(f: fm.Fill, q) -> str:
+    """Short buy confirmation. q is the quote the fill used (after the simulated delay)."""
+    entry_mc = q.market_cap * (f.sol / f.tokens) / q.price_sol if f.tokens and q.price_sol else q.market_cap
+    extra = (f.naive / f.tokens - 1) * 100 if f.tokens else 0
+    sym = q.symbol.lstrip("$")
+    return (f"🟢 Bought ${sym}\n"
+            f"MC: {usd(q.market_cap)} · Vol 24h: {usd(q.volume_24h)} · Liq: {usd(q.liquidity_usd)}\n\n"
+            f"Spent: {f.sol:g} SOL\nReceived: {f.tokens:,.0f} ${sym}\nEntry MC: {usd(entry_mc)}\n"
+            f"Fees {f.fee_sol:.4f} SOL · Impact {f.impact_pct:.2f}%\n"
+            f"<i>A naive paper fill would show {extra:.1f}% more tokens.</i>")
 
 
 def sell_text(symbol: str, percent: float, got_sol: float, realized: float, prefix: str = "") -> str:
     """Simple sell confirmation. Put in = cost basis of the sold portion (got back minus PnL)."""
     put_in = got_sol - realized
     pct = realized / put_in * 100 if put_in else 0.0
+    symbol = symbol.lstrip("$")
     icon = "🟢" if realized >= 0 else "🔴"
     return (f"{prefix}{icon} Sold {percent:g}% of ${symbol}\n"
             f"Put in: {put_in:.2f} SOL\nGot back: {got_sol:.2f} SOL\n"

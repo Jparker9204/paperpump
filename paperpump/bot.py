@@ -12,7 +12,7 @@ from . import config, ui
 from .db import DB
 from .fill import pnl
 from .prices import DexScreener
-from .service import MINT_RE, TradeError, Trader, fill_text, sell_text
+from .service import MINT_RE, TradeError, Trader, buy_text, sell_text
 
 log = logging.getLogger("paperpump")
 
@@ -113,8 +113,9 @@ SCREENS = {"menu": show_menu, "pf": show_portfolio, "st": show_stats, "hi": show
 async def do_buy(update, ctx, mint, sol):
     ensure_user(update, ctx)
     try:
-        q, f, sol_usd = await T(ctx).buy(update.effective_user.id, mint, sol)
-        await send(update, fill_text(f, ui.esc(q.symbol), sol_usd), ui.after_trade_kb())
+        q, f, _ = await T(ctx).buy(update.effective_user.id, mint, sol)
+        q.symbol = ui.esc(q.symbol)
+        await send(update, buy_text(f, q), ui.after_trade_kb())
     except TradeError as e:
         await send(update, f"❌ {ui.esc(e)}", ui.back_kb())
 

@@ -18,7 +18,7 @@ class SlowPrices:
     """Every price call takes 0.3s, like a slow API."""
     async def quote(self, mint, max_age=3.0):
         await asyncio.sleep(0.3)
-        return Quote(mint, "Demo", "DEMO", 1.5e-4, 1e-6, 20000, 50000, None, "pumpswap", "")
+        return Quote(mint, "Demo", "DEMO", 1.5e-4, 1e-6, 20000, 50000, None, "pumpswap", "", 210000)
 
     async def sol_usd(self):
         return 150.0
@@ -81,7 +81,7 @@ def test_callback_answered_before_slow_buy():
     run(bot.on_button(upd, ctx))
     assert ev[0][0] == "answer" and ev[0][1] < 0.05
     assert ev[-1][1] >= 0.2  # fill reply comes after the simulated delay
-    assert "PAPER BUY" in ev[-1][2][0]
+    assert "Bought $DEMO" in ev[-1][2][0]
 
 
 def test_handlers_run_concurrently():

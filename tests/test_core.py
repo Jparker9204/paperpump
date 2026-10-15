@@ -18,7 +18,7 @@ class FakePrices:
         self.price, self.liq = price, liq
 
     async def quote(self, mint, max_age=3.0):
-        return Quote(mint, "Demo", "DEMO", self.price * 150, self.price, self.liq, 50000, None, "pumpswap", "")
+        return Quote(mint, "Demo", "DEMO", self.price * 150, self.price, self.liq, 50000, None, "pumpswap", "", 210000)
 
     async def sol_usd(self):
         return 150.0
@@ -161,3 +161,19 @@ def test_tpsl_hit_reports_got_back():
     t.prices.price = 2e-6
     hit = run(t.check_tpsl())[0]
     assert hit[2] == "TP" and hit[4] - hit[3] == pytest.approx(1.001)  # put in = cost basis
+
+
+def test_usd_compact():
+    from paperpump.service import usd
+    assert [usd(950), usd(41200), usd(1.3e6), usd(2.1e9)] == ["$950", "$41.2K", "$1.3M", "$2.1B"]
+
+
+def test_buy_text_and_volume_parsing():
+    from paperpump.service import buy_text
+    q, f, _ = run(make()[1].buy(1, MINT, 0.5))
+    t = buy_text(f, q)
+    assert t.startswith("🟢 Bought $DEMO") and "MC: $50.0K · Vol 24h: $210.0K · Liq: $20.0K" in t
+    assert "Spent: 0.5 SOL" in t and "Entry MC:" in t and "Impact" in t and "drift" not in t.lower()
+    data = [{"chainId": "solana", "priceNative": "1", "baseToken": {"address": MINT}, "quoteToken": {"address": WSOL},
+             "volume": {"h24": 1234.5}}]
+    assert parse_pairs(MINT, data).volume_24h == 1234.5
