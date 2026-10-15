@@ -7,3 +7,6 @@ __pycache__/
 *.log
 .site_password
 screens/*.tmp
+*.db-wal
+*.db-shm
+*.db-journal
