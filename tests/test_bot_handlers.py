@@ -114,3 +114,15 @@ def test_error_handler_replies():
     ctx = SimpleNamespace(error=RuntimeError("boom"), bot=AsyncMock())
     run(bot.on_error(upd, ctx))
     assert ctx.bot.send_message.await_args.args[1] == "Something went wrong, try again."
+
+
+def test_sell_button_shows_simple_message():
+    ctx = make_ctx()
+    run(bot.on_button(make_update(data=f"b|0.5|{MINT}")[0], ctx))
+    pid = ctx.bot_data["trader"].db.open_positions(1)[0]["id"]
+    upd, ev = make_update(data=f"s|{pid}|100")
+    run(bot.on_button(upd, ctx))
+    text = ev[-1][2][0]
+    assert "Sold 100% of $DEMO" in text and "Put in:" in text and "PnL:" in text
+    assert "impact" not in text.lower() and "drift" not in text.lower()
+    assert ev[-1][3]["reply_markup"] is not None

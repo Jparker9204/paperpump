@@ -93,7 +93,7 @@ class Trader:
         self.db.reset(tg_id, self.cfg.start_balance, now)
 
     async def check_tpsl(self):
-        """Close positions whose TP or SL hit. Returns list of (tg_id, symbol, reason, realized)."""
+        """Close positions whose TP or SL hit. Returns list of (tg_id, symbol, reason, realized, got_sol)."""
         hits = []
         watched = [p for p in self.db.open_positions() if p["tp_pct"] is not None or p["sl_pct"] is not None]
         mints = list({p["mint"] for p in watched})
@@ -108,10 +108,10 @@ class Trader:
                       "SL" if pos["sl_pct"] is not None and pct <= -abs(pos["sl_pct"]) else None)
             if reason:
                 try:
-                    _, _, _, realized = await self.sell(pos["tg_id"], pos["mint"], 100, pos)
+                    _, f, _, realized = await self.sell(pos["tg_id"], pos["mint"], 100, pos)
                 except TradeError:
                     continue
-                hits.append((pos["tg_id"], pos["symbol"], reason, realized))
+                hits.append((pos["tg_id"], pos["symbol"], reason, realized, f.sol))
         return hits
 
 
@@ -127,3 +127,13 @@ def fill_text(f: fm.Fill, symbol: str, sol_usd: float) -> str:
             f"• Fees: {f.fee_sol:.4f} SOL (1% swap + {f.priority_fee:g} priority)\n"
             f"• Simulated delay drift: {f.drift_pct:+.2f}%\n"
             f"• {naive}\n<i>Paper trade, no real funds.</i>")
+
+
+def sell_text(symbol: str, percent: float, got_sol: float, realized: float, prefix: str = "") -> str:
+    """Simple sell confirmation. Put in = cost basis of the sold portion (got back minus PnL)."""
+    put_in = got_sol - realized
+    pct = realized / put_in * 100 if put_in else 0.0
+    icon = "🟢" if realized >= 0 else "🔴"
+    return (f"{prefix}{icon} Sold {percent:g}% of ${symbol}\n"
+            f"Put in: {put_in:.2f} SOL\nGot back: {got_sol:.2f} SOL\n"
+            f"PnL: <b>{realized:+.2f} SOL ({pct:+.1f}%)</b>")

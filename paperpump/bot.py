@@ -12,7 +12,7 @@ from . import config, ui
 from .db import DB
 from .fill import pnl
 from .prices import DexScreener
-from .service import MINT_RE, TradeError, Trader, fill_text
+from .service import MINT_RE, TradeError, Trader, fill_text, sell_text
 
 log = logging.getLogger("paperpump")
 
@@ -179,7 +179,7 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if kind == "s":
         try:
             _, f, sol_usd, realized = await tr.sell(uid, pos["mint"], float(parts[2]), pos)
-            await send(update, fill_text(f, ui.esc(pos["symbol"]), sol_usd) + f"\nRealized PnL: <b>{realized:+.4f} SOL</b>",
+            await send(update, sell_text(ui.esc(pos["symbol"]), float(parts[2]), f.sol, realized),
                        ui.after_trade_kb(), edit=True)
         except TradeError as e:
             await send(update, f"❌ {ui.esc(e)}", ui.back_kb(), edit=True)
@@ -217,7 +217,7 @@ async def cmd_sell(update, ctx):
     try:
         mint, pct = ctx.args[0], float(ctx.args[1].rstrip("%")) if len(ctx.args) > 1 else 100.0
         q, f, sol_usd, realized = await T(ctx).sell(update.effective_user.id, mint, pct)
-        await send(update, fill_text(f, ui.esc(q.symbol), sol_usd) + f"\nRealized PnL: <b>{realized:+.4f} SOL</b>",
+        await send(update, sell_text(ui.esc(q.symbol), pct, f.sol, realized),
                    ui.after_trade_kb())
     except (IndexError, ValueError):
         await show_portfolio(update, ctx)
@@ -241,9 +241,10 @@ async def cmd_tpsl(update, ctx):
 
 async def tpsl_job(ctx: ContextTypes.DEFAULT_TYPE):
     try:
-        for tg_id, sym, reason, realized in await T(ctx).check_tpsl():
+        for tg_id, sym, reason, realized, got in await T(ctx).check_tpsl():
             label = "Take profit" if reason == "TP" else "Stop loss"
-            await ctx.bot.send_message(tg_id, f"🎯 {label} hit on ${ui.esc(sym)}: sold, {realized:+.4f} SOL (paper)",
+            await ctx.bot.send_message(tg_id, sell_text(ui.esc(sym), 100, got, realized, prefix=f"🎯 {label} hit\n"),
+                                       parse_mode=ParseMode.HTML,
                                        reply_markup=ui.after_trade_kb())
     except Exception:
         log.exception("tp/sl check failed")

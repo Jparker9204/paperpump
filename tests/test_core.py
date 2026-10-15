@@ -143,3 +143,21 @@ def test_reset_cooldown_and_leaderboard():
     with pytest.raises(TradeError):
         t.reset(1, now=2000)
     t.reset(1, now=1000 + 25 * 3600)
+
+
+def test_sell_text_simple():
+    from paperpump.service import sell_text
+    t = sell_text("FROG", 100, 0.46, -0.04)
+    assert t.splitlines()[0] == "🔴 Sold 100% of $FROG"
+    assert "Put in: 0.50 SOL" in t and "Got back: 0.46 SOL" in t and "-0.04 SOL (-8.0%)" in t
+    assert "impact" not in t.lower() and "fee" not in t.lower() and "naive" not in t.lower()
+    assert sell_text("X", 50, 1.5, 0.5).startswith("🟢 Sold 50% of $X")
+
+
+def test_tpsl_hit_reports_got_back():
+    db, t = make()
+    run(t.buy(1, MINT, 1))
+    db.set_tpsl(db.open_position(1, MINT)["id"], tp=50)
+    t.prices.price = 2e-6
+    hit = run(t.check_tpsl())[0]
+    assert hit[2] == "TP" and hit[4] - hit[3] == pytest.approx(1.001)  # put in = cost basis
