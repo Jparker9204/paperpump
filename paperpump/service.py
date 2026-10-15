@@ -24,22 +24,26 @@ class Trader:
 
     async def _q(self, mint, fresh=False):
         try:
-            return await asyncio.wait_for(self.prices.quote(mint, **({"max_age": 0} if fresh else {})), 8)
+            q = await asyncio.wait_for(self.prices.quote(mint, **({"max_age": 0} if fresh else {})), 8)
         except TradeError:
             raise
         except Exception as e:
             raise TradeError("Price service is slow or unavailable right now. Try again.") from e
+        if q is None:
+            raise TradeError("No Solana/SOL pair found on DexScreener for that coin (it may be too new).")
+        return q
 
     async def _quotes(self, mint):
         q = await self._q(mint)
-        if not q:
-            raise TradeError("No Solana/SOL pair found on DexScreener for that mint.")
         try:
             sol_usd = await asyncio.wait_for(self.prices.sol_usd(), 8)
         except Exception as e:
             raise TradeError("Price service is slow or unavailable right now. Try again.") from e
         await self.sleep(self.cfg.delay_seconds)  # simulated landing delay (asyncio.sleep: non-blocking)
-        q2 = await self._q(mint, fresh=True) or q
+        try:
+            q2 = await self._q(mint, fresh=True)
+        except TradeError:
+            q2 = q  # re-quote failed: fill at the first quote
         return q, q2, sol_usd
 
     async def buy(self, tg_id, mint, sol):

@@ -267,3 +267,16 @@ def test_quotes_endpoint(env):
     login(client, 1)
     r = client.get(f"/api/quotes?mints={MINT},{MINT},bad").json()
     assert list(r) == [MINT] and r[MINT]["market_cap"] == 50000 and r[MINT]["price_sol"] == 1e-6
+
+
+def test_unknown_coin_is_400_not_500(env):
+    client, _, prices = env
+    login(client, 1)
+
+    async def none_quote(mint, max_age=None):
+        return None
+    prices.quote = none_quote
+    for path in (f"/api/token/{MINT}", f"/api/quote?mint={MINT}&side=buy&amount=0.5"):
+        r = client.get(path)
+        assert r.status_code == 400 and "No Solana/SOL pair" in r.json()["detail"], path
+    assert client.post("/api/buy", json={"mint": MINT, "sol": 0.5}).status_code == 400
