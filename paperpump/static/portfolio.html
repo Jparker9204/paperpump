@@ -8,24 +8,27 @@
 <script src="/static/app.js"></script>
 <script>
 nav("Portfolio");
-async function load() {
-  const [pf, st] = await Promise.all([api("/api/portfolio"), api("/api/stats")]);
+// Live: portfolio comes from the shared ~5s poll in app.js; stats are polled here.
+let stats = null;
+async function loadStats() { stats = await api("/api/stats"); if (portfolio) render(portfolio, stats); }
+document.addEventListener("portfolio", (e) => { if (stats) render(e.detail, stats); });
+function render(pf, st) {
   const value = pf.positions.reduce((a, p) => a + (p.value_sol || 0), 0);
-  $("#summary").innerHTML = `<div class="th">
+  setHTML($("#summary"), `<div class="th">
     <div class="stat"><span class="mu">Cash</span><b>${pf.balance.toFixed(3)} SOL</b></div>
     <div class="stat"><span class="mu">In positions</span><b>${value.toFixed(3)} SOL</b></div>
     <div class="stat"><span class="mu">Closed trades</span><b>${st.closed}</b></div>
     <div class="stat"><span class="mu">Win rate</span><b>${st.win_rate.toFixed(1)}%</b></div>
     <div class="stat"><span class="mu">Net PnL (closed)</span><b class="${cls(st.net_pnl)}">${signed(st.net_pnl, 4)} SOL</b></div>
-    <div class="stat"><span class="mu">Avg hold</span><b>${(st.avg_hold_s / 60).toFixed(1)} min</b></div></div>`;
-  $("#pos").innerHTML = `<tr><th>Coin</th><th>Cost</th><th>Value</th><th>PnL</th><th>Entry MC</th><th>MC · Vol 24h · Liq</th><th>TP / SL</th></tr>` +
+    <div class="stat"><span class="mu">Avg hold</span><b>${(st.avg_hold_s / 60).toFixed(1)} min</b></div></div>`);
+  setHTML($("#pos"), `<tr><th>Coin</th><th>Cost</th><th>Value</th><th>PnL</th><th>Entry MC</th><th>MC · Vol 24h · Liq</th><th>TP / SL</th></tr>` +
     (pf.positions.map((p) => `<tr><td><a href="/?mint=${encodeURIComponent(p.mint)}">$${esc(p.symbol)}</a></td>
       <td>${sol(p.cost_sol)}</td><td>${sol(p.value_sol)}</td>
       <td class="${p.pnl_sol === null ? "" : cls(p.pnl_sol)}">${p.pnl_sol === null ? "n/a" : `${signed(p.pnl_sol)} (${signed(p.pnl_pct, 1)}%)`}</td>
       <td>${p.market ? usd(p.market.entry_mc) : "–"}</td>
       <td>${p.market ? `${usd(p.market.market_cap)} · ${usd(p.market.volume_24h)} · ${usd(p.market.liquidity_usd)}` : "Market data unavailable"}</td>
       <td>${p.tp_pct ? "+" + p.tp_pct + "%" : "off"} / ${p.sl_pct ? "-" + p.sl_pct + "%" : "off"}</td></tr>`).join("")
-     || `<tr><td class="mu" colspan="7">No open positions. <a href="/">Find a coin to trade →</a></td></tr>`);
+     || `<tr><td class="mu" colspan="7">No open positions. <a href="/">Find a coin to trade →</a></td></tr>`));
 }
-load().catch(() => {}); setInterval(() => load().catch(() => {}), 10000);
+live(loadStats, 5000);
 </script></body></html>

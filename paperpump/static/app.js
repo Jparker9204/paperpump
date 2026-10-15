@@ -40,12 +40,62 @@ function nav(active) {
   <div class="nav"><a class="logo" href="/">🧪 PaperPump</a>
     <div class="links">${[["/", "Trade"], ["/portfolio", "Portfolio"], ["/history", "History"], ["/leaderboard", "Leaderboard"]]
       .map(([h, n]) => `<a href="${h}" class="${n === active ? "on" : ""}">${n}</a>`).join("")}</div>
-    <div class="sp"></div><div class="pill" id="bal">… SOL (paper)</div></div>
+    <div class="sp"></div><span class="live" id="live" title="Data refreshes automatically">Live <i>●</i> <span id="ago"></span></span>
+    <div class="pill" id="bal">… SOL (paper)</div></div>
   <div class="toast" id="toast"></div>`);
-  refreshBalance();
+  live(refreshPortfolio, 5000);
+  setInterval(() => { $("#ago").textContent = lastUpdate ? `updated ${Math.round((Date.now() - lastUpdate) / 1000)}s ago` : ""; }, 1000);
 }
 
-async function refreshBalance() {
-  try { const me = await api("/api/me"); $("#bal").textContent = `🧪 ${me.balance.toFixed(2)} SOL (paper)`; return me; }
-  catch (e) { $("#bal").textContent = "Not logged in"; }
+// ---------- Live updates ----------
+// live(fn, ms): run fn now and every ms while the tab is visible; paused when hidden.
+const pollers = [];
+let lastUpdate = 0;
+function live(fn, ms) {
+  const p = { fn, ms, timer: null, busy: false };
+  const tick = async () => {
+    clearTimeout(p.timer);
+    if (document.hidden) return;
+    if (!p.busy) {
+      p.busy = true;
+      try { await fn(); lastUpdate = Date.now(); $("#live").classList.remove("off"); }
+      catch (e) { $("#live").classList.add("off"); }
+      p.busy = false;
+    }
+    p.timer = setTimeout(tick, p.ms);
+  };
+  p.tick = tick;
+  pollers.push(p);
+  tick();
 }
+// Refresh everything now (call after your own buy/sell/TP/SL).
+function liveNow() { pollers.forEach((p) => p.tick()); }
+document.addEventListener("visibilitychange", () => { if (!document.hidden) liveNow(); });
+
+// setText: only touch the DOM when the value actually changed (no flicker).
+function setText(el, text) { if (el && el.textContent !== text) el.textContent = text; }
+function setHTML(el, html) { if (el && el._html !== html) { el.innerHTML = html; el._html = html; } }
+
+// Shared portfolio poll: updates the balance pill, notices changes made elsewhere
+// (Telegram bot, TP/SL auto-sells) and tells the page via a "portfolio" event.
+let portfolio = null, knownSig = null;
+const quiet = { until: 0 }; // suppress toasts right after our own action
+async function refreshPortfolio() {
+  let pf;
+  try { pf = await api("/api/portfolio"); } catch (e) { setText($("#bal"), "Not logged in"); throw e; }
+  setText($("#bal"), `🧪 ${pf.balance.toFixed(2)} SOL (paper)`);
+  const sig = Object.fromEntries(pf.positions.map((p) => [p.id, p]));
+  if (knownSig && Date.now() > quiet.until) {
+    for (const [id, old] of Object.entries(knownSig)) {
+      const now = sig[id];
+      if (!now) toast(`📕 Position $${esc(old.symbol)} closed`);
+      else if (Math.abs(now.tokens - old.tokens) > 1e-9) toast(`🔄 Position $${esc(now.symbol)} changed`);
+    }
+    for (const [id, p] of Object.entries(sig)) if (!knownSig[id]) toast(`📗 New position $${esc(p.symbol)}`);
+  }
+  knownSig = sig;
+  portfolio = pf;
+  document.dispatchEvent(new CustomEvent("portfolio", { detail: pf }));
+}
+// Call right after your own trade: no "changed elsewhere" toast, refresh everything.
+function afterAction() { quiet.until = Date.now() + 1500; knownSig = null; liveNow(); }

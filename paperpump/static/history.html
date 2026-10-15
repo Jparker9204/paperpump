@@ -5,13 +5,14 @@
 <script src="/static/app.js"></script>
 <script>
 nav("History");
-api("/api/history").then((rows) => {
-  $("#t").innerHTML = `<tr><th>Time</th><th>Side</th><th>Coin</th><th>SOL</th><th>Tokens</th><th>Fees</th><th>Impact</th><th>PnL</th></tr>` +
+live(async () => {
+  const rows = await api("/api/history");
+  setHTML($("#t"), `<tr><th>Time</th><th>Side</th><th>Coin</th><th>SOL</th><th>Tokens</th><th>Fees</th><th>Impact</th><th>PnL</th></tr>` +
     (rows.map((r) => `<tr><td>${new Date(r.ts * 1000).toLocaleString()}</td>
       <td class="${r.side === "buy" ? "g" : "r"}">${r.side.toUpperCase()}</td>
       <td><a href="/?mint=${encodeURIComponent(r.mint)}">$${esc((r.symbol || "?").replace(/^\$/, ""))}</a></td>
       <td>${r.sol.toFixed(4)}</td><td>${Math.round(r.tokens).toLocaleString()}</td><td>${r.fee_sol.toFixed(4)}</td>
       <td>${r.impact_pct.toFixed(2)}%</td><td class="${r.pnl_sol === null ? "" : cls(r.pnl_sol)}">${r.pnl_sol === null ? "" : signed(r.pnl_sol, 4)}</td></tr>`).join("")
-     || `<tr><td class="mu" colspan="8">No trades yet.</td></tr>`);
-}).catch(() => {});
+     || `<tr><td class="mu" colspan="8">No trades yet.</td></tr>`));
+}, 5000);
 </script></body></html>

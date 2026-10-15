@@ -214,3 +214,44 @@ def test_trade_page_has_no_fill_breakdown(env):
     client, _, _ = env
     html = client.get("/").text
     assert "Realistic fill estimate" not in html and "No position yet" in html
+
+
+def test_pages_are_live(env):
+    client, _, _ = env
+    js = client.get("/static/app.js").text
+    assert "visibilitychange" in js and "function live(" in js and "setTimeout(tick" in js
+    for page in ("/", "/portfolio", "/history", "/leaderboard"):
+        assert "live(" in client.get(page).text, page
+    trade = client.get("/").text
+    assert "live(refreshToken, 3000)" in trade and "setInterval" not in trade
+
+
+def test_quote_cache_shared_between_requests():
+    import time as _t
+
+    from paperpump.prices import DexScreener
+
+    class FakeResp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return []
+
+    class FakeClient:
+        calls = 0
+
+        async def get(self, url):
+            FakeClient.calls += 1
+            return FakeResp()
+
+    d = DexScreener(client=FakeClient())
+
+    async def go():
+        for _ in range(5):
+            await d.quote(MINT)
+    asyncio.run(go())
+    assert FakeClient.calls == 1  # 5 polls within 3s -> 1 upstream request
+    d._cache[MINT] = (_t.time() - 10, None)
+    asyncio.run(d.quote(MINT))
+    assert FakeClient.calls == 2

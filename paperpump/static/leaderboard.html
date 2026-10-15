@@ -6,11 +6,12 @@
 <script src="/static/app.js"></script>
 <script>
 nav("Leaderboard");
-api("/api/leaderboard").then((rows) => {
+live(async () => {
+  const rows = await api("/api/leaderboard");
   const medal = ["🥇", "🥈", "🥉"];
-  $("#t").innerHTML = `<tr><th>#</th><th>Trader</th><th>PnL</th><th>Win rate</th><th>Trades</th><th>Resets</th></tr>` +
+  setHTML($("#t"), `<tr><th>#</th><th>Trader</th><th>PnL</th><th>Win rate</th><th>Trades</th><th>Resets</th></tr>` +
     (rows.map((r, i) => `<tr style="${r.me ? "background:#0f1d33" : ""}"><td>${medal[i] || i + 1}</td><td>${esc(r.username || "anon")}${r.me ? " (you)" : ""}</td>
       <td class="${cls(r.pnl)}">${signed(r.pnl, 2)} SOL</td><td>${r.trades ? Math.round(r.wins / r.trades * 100) + "%" : "–"}</td>
-      <td>${r.trades}</td><td>${r.resets}</td></tr>`).join("") || `<tr><td class="mu" colspan="6">Empty</td></tr>`);
-}).catch(() => {});
+      <td>${r.trades}</td><td>${r.resets}</td></tr>`).join("") || `<tr><td class="mu" colspan="6">Empty</td></tr>`));
+}, 5000);
 </script></body></html>

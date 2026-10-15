@@ -56,3 +56,8 @@ h2{font-size:16px;margin-bottom:10px}
   .th .stat{min-width:28%}
   #panel{grid-row:auto!important}
 }
+
+.live{font-size:12px;color:var(--m);white-space:nowrap}.live i{color:var(--g);font-style:normal;animation:blink 2s infinite}
+.live.off i{color:var(--r);animation:none}
+@keyframes blink{50%{opacity:.35}}
+@media(max-width:600px){#ago{display:none}}

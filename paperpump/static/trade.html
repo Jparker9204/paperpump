@@ -30,7 +30,7 @@
   </div>
 
   <div class="card full">
-    <div class="pad" style="display:flex;justify-content:space-between"><h2>Open positions</h2><span class="mu" id="upd"></span></div>
+    <div class="pad" style="display:flex;justify-content:space-between"><h2>Open positions</h2></div>
     <div class="scroll"><table id="pos"></table></div>
   </div>
 </main>
@@ -58,7 +58,7 @@ $("#panel").addEventListener("click", async (e) => {
   const k = e.target.dataset.k; if (!k) return;
   const p = token && positions.find((x) => x.mint === token.mint);
   if (!p) return toast("Buy this coin first, then set take profit / stop loss.");
-  try { await api("/api/tpsl", { position_id: p.id, [k]: +e.target.dataset.v }); toast(`${k.toUpperCase()} set at ${k === "tp" ? "+" : "-"}${e.target.dataset.v}%`); loadPositions(); }
+  try { await api("/api/tpsl", { position_id: p.id, [k]: +e.target.dataset.v }); toast(`${k.toUpperCase()} set at ${k === "tp" ? "+" : "-"}${e.target.dataset.v}%`); afterAction(); }
   catch (err) { toast("❌ " + esc(err.message)); }
 });
 
@@ -81,15 +81,17 @@ async function loadToken(mint) {
   try { token = await api("/api/token/" + encodeURIComponent(mint)); }
   catch (e) { token = null; $("#header").innerHTML = `<span class="r">${esc(e.message)}</span>`; return; }
   const t = token;
+  // Built once; the numbers are then updated in place by refreshToken() every ~3s.
   $("#header").innerHTML = `
     <div class="name"><b>${esc(t.name)}</b> <span class="mu">$${esc(t.symbol)}</span><div class="mu">${esc(t.mint.slice(0, 6))}…${esc(t.mint.slice(-6))} · ${esc(t.dex)}</div></div>
-    <div class="stat"><span class="mu">Price</span><b>$${t.price_usd.toPrecision(4)}</b></div>
-    <div class="stat"><span class="mu">Market cap</span><b>${usd(t.market_cap)}</b></div>
-    <div class="stat"><span class="mu">Liquidity</span><b>${usd(t.liquidity_usd)}</b></div>
-    <div class="stat"><span class="mu">Vol 24h</span><b>${usd(t.volume_24h)}</b></div>
+    <div class="stat"><span class="mu">Price</span><b id="hPrice"></b></div>
+    <div class="stat"><span class="mu">Market cap</span><b id="hMc"></b></div>
+    <div class="stat"><span class="mu">Liquidity</span><b id="hLiq"></b></div>
+    <div class="stat"><span class="mu">Vol 24h</span><b id="hVol"></b></div>
     <div class="stat"><span class="mu">Holders</span><b>${t.holders ?? "n/a"}</b></div>
-    <div class="stat"><span class="mu">Age</span><b>${esc(t.age)}</b></div>
+    <div class="stat"><span class="mu">Age</span><b id="hAge"></b></div>
     <a class="mu" href="${esc(t.url)}" target="_blank" rel="noopener">DexScreener ↗</a>`;
+  renderHeader();
   // LIVE chart: DexScreener's official embed for this pair
   $("#chart").innerHTML = t.pair_address
     ? `<iframe title="Live chart" src="https://dexscreener.com/solana/${encodeURIComponent(t.pair_address)}?embed=1&theme=dark&trades=0&info=0"></iframe>`
@@ -98,20 +100,38 @@ async function loadToken(mint) {
   renderSummary(); preview();
 }
 
+function renderHeader() {
+  const t = token;
+  setText($("#hPrice"), "$" + t.price_usd.toPrecision(4));
+  setText($("#hMc"), usd(t.market_cap));
+  setText($("#hLiq"), usd(t.liquidity_usd));
+  setText($("#hVol"), usd(t.volume_24h));
+  setText($("#hAge"), t.age);
+}
+
+// Live token data (~3s). The server caches quotes per coin for 3s, shared by all users.
+async function refreshToken() {
+  if (!token) return;
+  const t = await api("/api/token/" + encodeURIComponent(token.mint));
+  if (!token || t.mint !== token.mint) return; // user switched coin meanwhile
+  token = t;
+  renderHeader();
+  preview();
+}
+
 // One small muted line: what you'd roughly get (fees included).
 async function preview() {
   if (!token) return;
   const amount = side === "buy" ? +$("#amount").value : pct;
-  $("#go").textContent = side === "buy" ? `Paper Buy ${amount || 0} SOL` : `Paper Sell ${pct}%`;
-  $("#hint").textContent = "";
-  if (!amount) return;
-  if (side === "sell" && !myPosition()) { $("#hint").textContent = "You don't hold this coin."; return; }
+  setText($("#go"), side === "buy" ? `Paper Buy ${amount || 0} SOL` : `Paper Sell ${pct}%`);
+  if (!amount) return setText($("#hint"), "");
+  if (side === "sell" && !myPosition()) return setText($("#hint"), "You don't hold this coin.");
   try {
     const q = await api(`/api/quote?mint=${encodeURIComponent(token.mint)}&side=${side}&amount=${amount}`);
-    $("#hint").textContent = side === "buy"
+    setText($("#hint"), side === "buy"
       ? `You'll get ~${Math.round(q.tokens).toLocaleString()} $${token.symbol}`
-      : `~${q.sol.toFixed(3)} SOL back`;
-  } catch (e) { $("#hint").textContent = e.message; }
+      : `~${q.sol.toFixed(3)} SOL back`);
+  } catch (e) { setText($("#hint"), e.message); }
 }
 
 const myPosition = () => token && positions.find((x) => x.mint === token.mint);
@@ -120,13 +140,13 @@ const myPosition = () => token && positions.find((x) => x.mint === token.mint);
 function renderSummary() {
   if (!token) return;
   const p = myPosition();
-  if (!p) { $("#summary").innerHTML = `<div class="mu">No position yet</div>`; return; }
+  if (!p) return setHTML($("#summary"), `<div class="mu">No position yet</div>`);
   const pnl = p.total_pnl_sol;
-  $("#summary").innerHTML = `
+  setHTML($("#summary"), `
     <div class="row">Bought<b>${p.bought_sol.toFixed(3)} SOL</b></div>
     <div class="row">Holding<b>${Math.round(p.tokens).toLocaleString()} $${esc(p.symbol)} · ${sol(p.value_sol)} SOL</b></div>
     <div class="row">Sold<b>${p.sold_sol.toFixed(3)} SOL</b></div>
-    <div class="row">PnL<b class="${pnl === null ? "" : cls(pnl)}">${pnl === null ? "n/a" : `${signed(pnl)} SOL (${signed(p.total_pnl_pct, 1)}%)`}</b></div>`;
+    <div class="row">PnL<b class="${pnl === null ? "" : cls(pnl)}">${pnl === null ? "n/a" : `${signed(pnl)} SOL (${signed(p.total_pnl_pct, 1)}%)`}</b></div>`);
 }
 
 $("#go").onclick = async () => {
@@ -142,14 +162,15 @@ $("#go").onclick = async () => {
       const r = await api("/api/sell", { position_id: p.id, percent: pct });
       toast(`${r.pnl_sol >= 0 ? "🟢" : "🔴"} Sold ${r.percent}% of $${esc(r.symbol)}<br>Put in ${r.put_in.toFixed(2)} SOL · Got back ${r.got_back.toFixed(2)} SOL<br>PnL ${signed(r.pnl_sol, 2)} SOL (${signed(r.pnl_pct, 1)}%)`, 6000);
     }
-    refreshBalance(); await loadPositions(); preview();
+    afterAction();
   } catch (e) { toast("❌ " + esc(e.message)); }
   $("#go").disabled = false;
 };
 
-async function loadPositions() {
-  try { positions = (await api("/api/portfolio")).positions; } catch (e) { return; }
-  $("#pos").innerHTML = `<tr><th>Coin</th><th>Cost</th><th>Value</th><th>PnL</th><th>MC</th><th>TP / SL</th><th></th></tr>` +
+// Positions table + summary: redrawn from the shared live portfolio poll (~5s), only when something changed.
+document.addEventListener("portfolio", (e) => {
+  positions = e.detail.positions;
+  setHTML($("#pos"), `<tr><th>Coin</th><th>Cost</th><th>Value</th><th>PnL</th><th>MC</th><th>TP / SL</th><th></th></tr>` +
     (positions.map((p) => `<tr>
       <td><a href="/?mint=${encodeURIComponent(p.mint)}">$${esc(p.symbol)}</a></td><td>${sol(p.cost_sol)} SOL</td>
       <td>${sol(p.value_sol)} SOL</td>
@@ -157,21 +178,19 @@ async function loadPositions() {
       <td>${p.market ? usd(p.market.market_cap) : "–"}</td>
       <td>${p.tp_pct ? "+" + p.tp_pct + "%" : "off"} / ${p.sl_pct ? "-" + p.sl_pct + "%" : "off"}</td>
       <td>${[25, 50, 100].map((x) => `<button class="btn sm" onclick="quickSell(${p.id},${x})">Sell ${x}%</button>`).join(" ")}</td></tr>`).join("")
-     || `<tr><td class="mu" colspan="7">No open positions yet.</td></tr>`);
-  $("#upd").textContent = "Updated " + new Date().toLocaleTimeString();
+     || `<tr><td class="mu" colspan="7">No open positions yet.</td></tr>`));
   renderSummary();
-}
+});
 
 async function quickSell(id, p) {
   try {
     const r = await api("/api/sell", { position_id: id, percent: p });
     toast(`${r.pnl_sol >= 0 ? "🟢" : "🔴"} Sold ${r.percent}% of $${esc(r.symbol)} · PnL ${signed(r.pnl_sol, 2)} SOL (${signed(r.pnl_pct, 1)}%)`, 6000);
-    refreshBalance(); loadPositions();
+    afterAction();
   } catch (e) { toast("❌ " + esc(e.message)); }
 }
 
-loadPositions();
-setInterval(loadPositions, 10000); // auto-refresh every 10s
+live(refreshToken, 3000);
 const m = new URLSearchParams(location.search).get("mint");
 if (m) { $("#mint").value = m; loadToken(m); }
 </script></body></html>
