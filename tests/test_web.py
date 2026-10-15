@@ -20,6 +20,9 @@ class FakePrices:
         return Quote(mint, "Demo", "DEMO", self.price * 150, self.price, 20000, 50000, None, "pumpswap", "",
                      210000, "PairAddr111")
 
+    async def quotes(self, mints, max_age=None):
+        return {m: await self.quote(m) for m in mints}
+
     async def sol_usd(self):
         return 150.0
 
@@ -223,7 +226,7 @@ def test_pages_are_live(env):
     for page in ("/", "/portfolio", "/history", "/leaderboard"):
         assert "live(" in client.get(page).text, page
     trade = client.get("/").text
-    assert "live(refreshToken, 3000)" in trade and "setInterval" not in trade
+    assert "live(priceTick, 1200)" in trade and "/api/quotes?mints=" in trade and "setInterval" not in trade
 
 
 def test_quote_cache_shared_between_requests():
@@ -232,6 +235,8 @@ def test_quote_cache_shared_between_requests():
     from paperpump.prices import DexScreener
 
     class FakeResp:
+        status_code = 200
+
         def raise_for_status(self):
             pass
 
@@ -251,7 +256,14 @@ def test_quote_cache_shared_between_requests():
         for _ in range(5):
             await d.quote(MINT)
     asyncio.run(go())
-    assert FakeClient.calls == 1  # 5 polls within 3s -> 1 upstream request
+    assert FakeClient.calls == 1  # 5 polls within the 1s TTL -> 1 upstream request
     d._cache[MINT] = (_t.time() - 10, None)
     asyncio.run(d.quote(MINT))
     assert FakeClient.calls == 2
+
+
+def test_quotes_endpoint(env):
+    client, _, _ = env
+    login(client, 1)
+    r = client.get(f"/api/quotes?mints={MINT},{MINT},bad").json()
+    assert list(r) == [MINT] and r[MINT]["market_cap"] == 50000 and r[MINT]["price_sol"] == 1e-6

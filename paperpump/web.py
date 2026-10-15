@@ -160,6 +160,18 @@ def create_app(cfg: config.Config, db: DB, prices, sleep=asyncio.sleep) -> FastA
         except TradeError as e:
             err(e)
 
+    @app.get("/api/quotes")
+    async def quotes(mints: str, u=Depends(current_user)):
+        """Live prices for several coins in one call (shared ~1s cache, batched upstream). Max 30."""
+        wanted = [m for m in dict.fromkeys(mints.split(",")) if MINT_RE.match(m)][:30]
+        try:
+            got = await asyncio.wait_for(prices.quotes(wanted), 8)
+        except Exception as e:
+            raise HTTPException(503, "Price service is busy, retrying…") from e
+        return {m: ({"price_sol": q.price_sol, "price_usd": q.price_usd, "market_cap": q.market_cap,
+                     "liquidity_usd": q.liquidity_usd, "volume_24h": q.volume_24h, "age": q.age} if q else None)
+                for m, q in got.items()}
+
     @app.get("/api/quote")
     async def quote(mint: str, side: str = "buy", amount: float = 0.0, u=Depends(current_user)):
         """Realistic-fill preview (no delay, nothing saved)."""

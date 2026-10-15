@@ -81,7 +81,7 @@ async function loadToken(mint) {
   try { token = await api("/api/token/" + encodeURIComponent(mint)); }
   catch (e) { token = null; $("#header").innerHTML = `<span class="r">${esc(e.message)}</span>`; return; }
   const t = token;
-  // Built once; the numbers are then updated in place by refreshToken() every ~3s.
+  // Built once; the numbers are then updated in place by applyPrices() every ~1.2s.
   $("#header").innerHTML = `
     <div class="name"><b>${esc(t.name)}</b> <span class="mu">$${esc(t.symbol)}</span><div class="mu">${esc(t.mint.slice(0, 6))}…${esc(t.mint.slice(-6))} · ${esc(t.dex)}</div></div>
     <div class="stat"><span class="mu">Price</span><b id="hPrice"></b></div>
@@ -97,7 +97,7 @@ async function loadToken(mint) {
     ? `<iframe title="Live chart" src="https://dexscreener.com/solana/${encodeURIComponent(t.pair_address)}?embed=1&theme=dark&trades=0&info=0"></iframe>`
     : `<div class="empty">No chart available for this coin.</div>`;
   $("#go").disabled = false;
-  renderSummary(); preview();
+  renderSummary(); preview(); liveNow();
 }
 
 function renderHeader() {
@@ -107,16 +107,6 @@ function renderHeader() {
   setText($("#hLiq"), usd(t.liquidity_usd));
   setText($("#hVol"), usd(t.volume_24h));
   setText($("#hAge"), t.age);
-}
-
-// Live token data (~3s). The server caches quotes per coin for 3s, shared by all users.
-async function refreshToken() {
-  if (!token) return;
-  const t = await api("/api/token/" + encodeURIComponent(token.mint));
-  if (!token || t.mint !== token.mint) return; // user switched coin meanwhile
-  token = t;
-  renderHeader();
-  preview();
 }
 
 // One small muted line: what you'd roughly get (fees included).
@@ -137,16 +127,59 @@ async function preview() {
 const myPosition = () => token && positions.find((x) => x.mint === token.mint);
 
 // Compact summary of your position in the loaded coin (same on Buy and Sell tabs).
+// Structure comes from the ~5s position poll; Holding/PnL numbers are filled by applyPrices() every ~1.2s.
 function renderSummary() {
   if (!token) return;
   const p = myPosition();
   if (!p) return setHTML($("#summary"), `<div class="mu">No position yet</div>`);
-  const pnl = p.total_pnl_sol;
   setHTML($("#summary"), `
-    <div class="row">Bought<b>${p.bought_sol.toFixed(3)} SOL</b></div>
-    <div class="row">Holding<b>${Math.round(p.tokens).toLocaleString()} $${esc(p.symbol)} · ${sol(p.value_sol)} SOL</b></div>
-    <div class="row">Sold<b>${p.sold_sol.toFixed(3)} SOL</b></div>
-    <div class="row">PnL<b class="${pnl === null ? "" : cls(pnl)}">${pnl === null ? "n/a" : `${signed(pnl)} SOL (${signed(p.total_pnl_pct, 1)}%)`}</b></div>`);
+    <div class="row">Bought<b id="sBought"></b></div>
+    <div class="row">Holding<b id="sHold"></b></div>
+    <div class="row">Sold<b id="sSold"></b></div>
+    <div class="row">PnL<b id="sPnl"></b></div>`);
+  applyPrices();
+}
+
+// ---------- fast price tick (~1.2s) ----------
+// Holding value and PnL are computed here in the browser from the newest price,
+// so they move in the same tick as the market cap.
+const prices = {};  // mint -> latest quote
+function valueOf(p) {
+  const q = prices[p.mint];
+  return q ? p.tokens * q.price_sol : p.value_sol;  // fall back to the 5s server value
+}
+function setPnl(el, pnl, pct) {
+  if (!el) return;
+  setText(el, pnl === null || pnl === undefined || isNaN(pnl) ? "n/a" : `${signed(pnl)} SOL (${signed(pct, 1)}%)`);
+  const c = pnl >= 0 ? "g" : "r";
+  if (!el.classList.contains(c)) { el.classList.remove("g", "r"); el.classList.add(c); }
+}
+function applyPrices() {
+  if (token && prices[token.mint]) Object.assign(token, prices[token.mint]), renderHeader();
+  const p = myPosition();
+  if (p && $("#sHold")) {
+    const v = valueOf(p);
+    setText($("#sBought"), `${p.bought_sol.toFixed(3)} SOL`);
+    setText($("#sSold"), `${p.sold_sol.toFixed(3)} SOL`);
+    setText($("#sHold"), `${Math.round(p.tokens).toLocaleString()} $${p.symbol} · ${sol(v)} SOL`);
+    const total = v + p.sold_sol - p.bought_sol;
+    setPnl($("#sPnl"), total, p.bought_sol ? total / p.bought_sol * 100 : 0);
+  }
+  for (const r of positions) {
+    const v = valueOf(r), q = prices[r.mint];
+    setText($("#v-" + r.id), `${sol(v)} SOL`);
+    setPnl($("#p-" + r.id), v - r.cost_sol, r.cost_sol ? (v - r.cost_sol) / r.cost_sol * 100 : 0);
+    setText($("#m-" + r.id), q ? usd(q.market_cap) : r.market ? usd(r.market.market_cap) : "–");
+  }
+}
+let tickN = 0;
+async function priceTick() {
+  const mints = [...new Set([token && token.mint, ...positions.map((p) => p.mint)].filter(Boolean))];
+  if (!mints.length) return;
+  const got = await api("/api/quotes?mints=" + mints.join(","));
+  for (const [m, q] of Object.entries(got)) if (q) prices[m] = q;
+  applyPrices();
+  if (++tickN % 3 === 0) preview();  // the "You'll get ~…" line every ~3.6s is plenty
 }
 
 $("#go").onclick = async () => {
@@ -173,13 +206,12 @@ document.addEventListener("portfolio", (e) => {
   setHTML($("#pos"), `<tr><th>Coin</th><th>Cost</th><th>Value</th><th>PnL</th><th>MC</th><th>TP / SL</th><th></th></tr>` +
     (positions.map((p) => `<tr>
       <td><a href="/?mint=${encodeURIComponent(p.mint)}">$${esc(p.symbol)}</a></td><td>${sol(p.cost_sol)} SOL</td>
-      <td>${sol(p.value_sol)} SOL</td>
-      <td class="${p.pnl_sol === null ? "" : cls(p.pnl_sol)}">${p.pnl_sol === null ? "n/a" : `${signed(p.pnl_sol)} SOL (${signed(p.pnl_pct, 1)}%)`}</td>
-      <td>${p.market ? usd(p.market.market_cap) : "–"}</td>
+      <td id="v-${p.id}"></td><td id="p-${p.id}"></td><td id="m-${p.id}"></td>
       <td>${p.tp_pct ? "+" + p.tp_pct + "%" : "off"} / ${p.sl_pct ? "-" + p.sl_pct + "%" : "off"}</td>
       <td>${[25, 50, 100].map((x) => `<button class="btn sm" onclick="quickSell(${p.id},${x})">Sell ${x}%</button>`).join(" ")}</td></tr>`).join("")
      || `<tr><td class="mu" colspan="7">No open positions yet.</td></tr>`));
   renderSummary();
+  applyPrices();
 });
 
 async function quickSell(id, p) {
@@ -190,7 +222,7 @@ async function quickSell(id, p) {
   } catch (e) { toast("❌ " + esc(e.message)); }
 }
 
-live(refreshToken, 3000);
+live(priceTick, 1200);  // prices ~1.2s; positions/balance come from the ~5s poll in app.js
 const m = new URLSearchParams(location.search).get("mint");
 if (m) { $("#mint").value = m; loadToken(m); }
 </script></body></html>
