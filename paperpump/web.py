@@ -1,4 +1,6 @@
-"""PaperPump website: FastAPI backend + plain HTML/JS pages in paperpump/static.
+"""PaperPump website (all endpoints are async: the shared sqlite connection is only used from the event loop thread)
+
+PaperPump website: FastAPI backend + plain HTML/JS pages in paperpump/static.
 
 Run: .venv/bin/uvicorn paperpump.web:app --host 127.0.0.1 --port 8000
 Shares the SQLite DB and trading logic (service.py) with the Telegram bot.
@@ -73,7 +75,7 @@ def create_app(cfg: config.Config, db: DB, prices, sleep=asyncio.sleep) -> FastA
         resp.headers["Referrer-Policy"] = "no-referrer"
         return resp
 
-    def current_user(request: Request):
+    async def current_user(request: Request):
         got = auth.verify(secret, request.cookies.get("pp_session", ""), "session")
         u = db.user(got[0]) if got else None
         if not u:
@@ -81,15 +83,15 @@ def create_app(cfg: config.Config, db: DB, prices, sleep=asyncio.sleep) -> FastA
         return u
 
     @app.get("/robots.txt", response_class=PlainTextResponse)
-    def robots():
+    async def robots():
         return "User-agent: *\nDisallow: /\n"
 
     @app.get("/gate", response_class=HTMLResponse)
-    def gate_page():
+    async def gate_page():
         return GATE_HTML.format(err="")
 
     @app.post("/gate")
-    def gate_submit(password: str = Form("")):
+    async def gate_submit(password: str = Form("")):
         if cfg.site_password and hmac.compare_digest(password.encode(), cfg.site_password.encode()):
             resp = RedirectResponse("/", status_code=303)
             set_cookie(resp, "pp_gate", auth.gate_cookie(secret, cfg.site_password), 30 * 86400)
@@ -97,7 +99,7 @@ def create_app(cfg: config.Config, db: DB, prices, sleep=asyncio.sleep) -> FastA
         return HTMLResponse(GATE_HTML.format(err="<p class=r>Wrong password.</p>"), status_code=401)
 
     @app.get("/login")
-    def login(t: str = ""):
+    async def login(t: str = ""):
         got = auth.verify(secret, t, "login")
         if not got or not db.user(got[0]) or not db.use_nonce(got[1]):
             return HTMLResponse("<p>This login link is invalid, expired or already used. "
@@ -109,16 +111,21 @@ def create_app(cfg: config.Config, db: DB, prices, sleep=asyncio.sleep) -> FastA
         return resp
 
     @app.post("/logout")
-    def logout():
+    async def logout():
         resp = RedirectResponse("/", status_code=303)
         resp.delete_cookie("pp_session")
         return resp
 
+    def _page(fname):
+        async def page():
+            return FileResponse(STATIC / fname)
+        return page
+
     for route, fname in PAGES.items():
-        app.add_api_route(route, (lambda f=fname: FileResponse(STATIC / f)), methods=["GET"], include_in_schema=False)
+        app.add_api_route(route, _page(fname), methods=["GET"], include_in_schema=False)
 
     @app.get("/static/{name}")
-    def static(name: str):
+    async def static(name: str):
         f = (STATIC / name).resolve()
         if f.parent != STATIC.resolve() or not f.is_file():
             raise HTTPException(404)
@@ -196,7 +203,7 @@ def create_app(cfg: config.Config, db: DB, prices, sleep=asyncio.sleep) -> FastA
                 "balance": db.user(u["tg_id"])["balance"]}
 
     @app.post("/api/tpsl")
-    def tpsl(body: TpSlIn, u=Depends(current_user)):
+    async def tpsl(body: TpSlIn, u=Depends(current_user)):
         pos = db.position(body.position_id, u["tg_id"])
         if not pos:
             raise HTTPException(404, "Position not found or already closed.")
@@ -230,15 +237,15 @@ def create_app(cfg: config.Config, db: DB, prices, sleep=asyncio.sleep) -> FastA
         return {"balance": u["balance"], "sol_usd": await sol_usd(), "positions": out}
 
     @app.get("/api/history")
-    def history(u=Depends(current_user)):
+    async def history(u=Depends(current_user)):
         return [dict(r) for r in db.history(u["tg_id"], 50)]
 
     @app.get("/api/stats")
-    def stats(u=Depends(current_user)):
+    async def stats(u=Depends(current_user)):
         return db.stats(u["tg_id"])
 
     @app.get("/api/leaderboard")
-    def leaderboard(u=Depends(current_user)):
+    async def leaderboard(u=Depends(current_user)):
         return [{"username": r["username"], "pnl": r["pnl"], "trades": r["n"], "wins": r["wins"],
                  "resets": r["resets"], "me": r["tg_id"] == u["tg_id"]} for r in db.leaderboard(25)]
 
