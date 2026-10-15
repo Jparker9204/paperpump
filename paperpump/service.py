@@ -144,3 +144,43 @@ def sell_text(symbol: str, percent: float, got_sol: float, realized: float, pref
     return (f"{prefix}{icon} Sold {percent:g}% of ${symbol}\n"
             f"Put in: {put_in:.2f} SOL\nGot back: {got_sol:.2f} SOL\n"
             f"PnL: <b>{realized:+.2f} SOL ({pct:+.1f}%)</b>")
+
+
+PORTFOLIO_MAX_CHARS = 3800  # Telegram limit is 4096; leave room for the footer and HTML
+PORTFOLIO_MAX_POSITIONS = 20  # keeps the button grid well under Telegram's limits
+
+
+def portfolio_text(balance: float, sol_usd: float, positions, quotes) -> tuple[str, list[int]]:
+    """Portfolio message plus the ids of the positions shown (in order, for the buttons)."""
+    from html import escape
+    usd_bal = f" (${balance * sol_usd:,.0f})" if sol_usd else ""
+    lines = [f"💼 <b>Portfolio</b>\nBalance: <b>{balance:.3f} SOL</b>{usd_bal}"]
+    shown: list[int] = []
+    size = len(lines[0])
+    for i, (p, q) in enumerate(zip(positions, quotes, strict=True), 1):
+        sym = escape((p["symbol"] or "?").lstrip("$"))
+        tp = f"+{p['tp_pct']:g}%" if p["tp_pct"] else "off"
+        sl = f"-{p['sl_pct']:g}%" if p["sl_pct"] else "off"
+        if q:
+            val = p["tokens"] * q.price_sol
+            d, pct = fm.pnl(p["cost_sol"], val)
+            entry = (f" · Entry MC {usd(q.market_cap * (p['cost_sol'] / p['tokens']) / q.price_sol)}"
+                     if p["tokens"] and q.price_sol else "")
+            block = (f"\n{i}. {'🟢' if d >= 0 else '🔴'} <b>${sym}</b>  {pct:+.1f}% ({d:+.3f} SOL)\n"
+                     f"   Cost {p['cost_sol']:.3f} → now {val:.3f} SOL{entry}\n"
+                     f"   MC: {usd(q.market_cap)} · Vol 24h: {usd(q.volume_24h)} · Liq: {usd(q.liquidity_usd)}\n"
+                     f"   TP {tp} · SL {sl}")
+        else:
+            block = (f"\n{i}. ⚪ <b>${sym}</b>\n   Cost {p['cost_sol']:.3f} SOL\n"
+                     f"   Market data unavailable\n   TP {tp} · SL {sl}")
+        if size + len(block) > PORTFOLIO_MAX_CHARS or len(shown) >= PORTFOLIO_MAX_POSITIONS:
+            lines.append(f"\n…and {len(positions) - len(shown)} more (sell some to see them).")
+            break
+        lines.append(block)
+        shown.append(p["id"])
+        size += len(block) + 1
+    if not positions:
+        lines.append("\nNo open positions yet. Paste a contract address to buy something.")
+    elif len(shown) > 1:
+        lines.append("\n<i>Buttons below are in the same order as the list.</i>")
+    return "\n".join(lines), shown

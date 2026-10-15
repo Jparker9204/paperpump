@@ -10,9 +10,8 @@ from telegram.ext import Application, CallbackQueryHandler, CommandHandler, Cont
 
 from . import config, ui
 from .db import DB
-from .fill import pnl
 from .prices import DexScreener
-from .service import MINT_RE, TradeError, Trader, buy_text, sell_text
+from .service import MINT_RE, TradeError, Trader, buy_text, portfolio_text, sell_text
 
 log = logging.getLogger("paperpump")
 
@@ -54,22 +53,11 @@ async def show_portfolio(update, ctx, edit=False):
         sol_usd = await asyncio.wait_for(tr.prices.sol_usd(), 8)
     except Exception:
         sol_usd = 0.0
-    lines = [f"💼 <b>Portfolio</b>\nBalance: <b>{u['balance']:.3f} SOL</b> (${u['balance'] * sol_usd:,.0f})"]
     positions = tr.db.open_positions(u["tg_id"])
     res = await asyncio.gather(*(tr._q(p["mint"]) for p in positions), return_exceptions=True)
-    for i, (p, q) in enumerate(zip(positions, res, strict=True), 1):
-        q = None if isinstance(q, BaseException) else q
-        val = p["tokens"] * q.price_sol if q else 0
-        d, pct = pnl(p["cost_sol"], val)
-        tp = f"+{p['tp_pct']:g}%" if p["tp_pct"] else "off"
-        sl = f"-{p['sl_pct']:g}%" if p["sl_pct"] else "off"
-        lines.append(f"\n{i}. {'🟢' if d >= 0 else '🔴'} <b>${ui.esc(p['symbol'])}</b>  {pct:+.1f}% ({d:+.3f} SOL)\n"
-                     f"   Cost {p['cost_sol']:.3f} → now {val:.3f} SOL · TP {tp} · SL {sl}")
-    if not positions:
-        lines.append("\nNo open positions yet. Paste a contract address to buy something.")
-    elif len(positions) > 1:
-        lines.append("\n<i>Buttons below are in the same order as the list.</i>")
-    await send(update, "\n".join(lines), ui.portfolio_kb([p["id"] for p in positions]), edit)
+    quotes = [None if isinstance(q, BaseException) else q for q in res]
+    text, shown = portfolio_text(u["balance"], sol_usd, positions, quotes)
+    await send(update, text, ui.portfolio_kb(shown), edit)
 
 
 async def show_stats(update, ctx, edit=False):

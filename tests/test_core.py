@@ -177,3 +177,26 @@ def test_buy_text_and_volume_parsing():
     data = [{"chainId": "solana", "priceNative": "1", "baseToken": {"address": MINT}, "quoteToken": {"address": WSOL},
              "volume": {"h24": 1234.5}}]
     assert parse_pairs(MINT, data).volume_24h == 1234.5
+
+
+def _pos(i, sym="FROG", tokens=1e6, cost=0.5):
+    return {"id": i, "symbol": sym, "tokens": tokens, "cost_sol": cost, "tp_pct": 100, "sl_pct": None, "mint": MINT}
+
+
+def test_portfolio_text_market_line_and_unavailable():
+    from paperpump.service import portfolio_text
+    q = run(FakePrices(price=1e-6).quote(MINT))
+    q.volume_24h = 210000
+    text, shown = portfolio_text(10, 150, [_pos(1), _pos(2, "DOG")], [q, None])
+    assert "   MC: $50.0K · Vol 24h: $210.0K · Liq: $20.0K" in text
+    assert "Entry MC $25.0K" in text  # paid 0.5 SOL for 1M tokens = 5e-7 vs price 1e-6
+    assert "$DOG" in text and "   Market data unavailable" in text
+    assert shown == [1, 2]
+
+
+def test_portfolio_text_stays_under_telegram_limit():
+    from paperpump.service import portfolio_text
+    q = run(FakePrices().quote(MINT))
+    positions = [_pos(i, "X" * 30) for i in range(200)]
+    text, shown = portfolio_text(10, 150, positions, [q] * 200)
+    assert len(text) < 4096 and 0 < len(shown) < 200 and "more" in text
