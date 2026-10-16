@@ -91,3 +91,8 @@ Droplet creation:
 - **ufw** firewall (SSH, HTTP, HTTPS only) and **unattended-upgrades** for security patches
 - **No secrets in the repo**: the Telegram token is entered on the server (`paperpump-set-token`) and never stored in the script or repo
 - **One-command updates**: `paperpump-update` pulls the latest code and restarts the services
+
+Later I moved the site off the sslip.io hostname to a custom domain registered with Cloudflare:
+a DNS-only A record points at the Droplet, Caddy issued the HTTPS certificate automatically,
+and updating `BASE_URL` made the bot's signed login links use the domain
+([steps](deploy/digitalocean/README.md#custom-domain-optional)).
