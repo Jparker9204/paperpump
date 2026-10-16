@@ -1,7 +1,7 @@
 """Fill model (pure functions, easy to test).
 
 Pool approximation: constant product x*y=k. The SOL side of the pool is about half
-of the reported USD liquidity. This is an estimate: pump.fun bonding curves and
+of the reported USD liquidity. This is an estimate: Pump.fun-style bonding curves and
 concentrated-liquidity pools behave differently.
 """
 from dataclasses import dataclass

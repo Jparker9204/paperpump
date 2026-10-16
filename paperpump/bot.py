@@ -4,7 +4,7 @@ import logging
 import time
 from pathlib import Path
 
-from telegram import BotCommand, Update
+from telegram import BotCommand, LinkPreviewOptions, Update
 from telegram.constants import ParseMode
 from telegram.error import BadRequest, TelegramError
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
@@ -16,6 +16,7 @@ from .prices import DexScreener
 from .service import MINT_RE, TradeError, Trader, buy_text, leaderboard_text, portfolio_text, sell_text
 
 log = logging.getLogger("paperpump")
+NO_PREVIEW = LinkPreviewOptions(is_disabled=True)  # never show link previews in bot messages
 
 
 def T(ctx) -> Trader:
@@ -28,12 +29,12 @@ async def send(update: Update, text, kb=None, edit=False):
     if edit and q:
         try:
             return await q.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=kb,
-                                             disable_web_page_preview=True)
+                                             link_preview_options=NO_PREVIEW)
         except BadRequest as e:
             if "not modified" in str(e).lower():
                 return
     await update.effective_message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=kb,
-                                              disable_web_page_preview=True)
+                                              link_preview_options=NO_PREVIEW)
 
 
 def ensure_user(update, ctx):
@@ -233,7 +234,7 @@ async def cmd_start(update, ctx):
     ensure_user(update, ctx)
     # Sets the always-visible bottom keyboard. Not emoji-only (Telegram renders those huge).
     await update.effective_message.reply_text("Your quick buttons are at the bottom of the chat.",
-                                              reply_markup=ui.reply_keyboard())
+                                              reply_markup=ui.reply_keyboard(), link_preview_options=NO_PREVIEW)
     await show_menu(update, ctx)
 
 
@@ -276,7 +277,7 @@ async def tpsl_job(ctx: ContextTypes.DEFAULT_TYPE):
         for tg_id, sym, reason, realized, got in await T(ctx).check_tpsl():
             label = "Take profit" if reason == "TP" else "Stop loss"
             await ctx.bot.send_message(tg_id, sell_text(ui.esc(sym), 100, got, realized, prefix=f"🎯 {label} hit\n"),
-                                       parse_mode=ParseMode.HTML,
+                                       parse_mode=ParseMode.HTML, link_preview_options=NO_PREVIEW,
                                        reply_markup=ui.after_trade_kb())
     except Exception:
         log.exception("tp/sl check failed")
@@ -287,7 +288,7 @@ async def on_error(update, ctx: ContextTypes.DEFAULT_TYPE):
     if isinstance(update, Update) and update.effective_chat:
         try:
             await ctx.bot.send_message(update.effective_chat.id, "Something went wrong, try again.",
-                                       reply_markup=ui.back_kb())
+                                       reply_markup=ui.back_kb(), link_preview_options=NO_PREVIEW)
         except TelegramError:
             pass
 
