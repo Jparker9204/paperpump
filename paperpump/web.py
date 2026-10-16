@@ -58,9 +58,11 @@ NAV_LINKS = (("/", "Trade", "Trade"), ("/discover", "Discover", "Discover"), ("/
 
 
 def nav_html(active_path: str) -> str:
-    links = "".join(f'<a href="{h}" class="{"on" if h == active_path else ""}"'
-                    f'{" aria-current=\"page\"" if h == active_path else ""}>'
-                    f'<span class="ln">{n}</span><span class="sn">{s}</span></a>' for h, n, s in NAV_LINKS)
+    parts = []
+    for h, n, short in NAV_LINKS:
+        on = ' class="on" aria-current="page"' if h == active_path else ' class=""'
+        parts.append(f'<a href="{h}"{on}><span class="ln">{n}</span><span class="sn">{short}</span></a>')
+    links = "".join(parts)
     return ('<div class="banner">🧪 Paper trading only. Fake SOL, real prices. Not financial advice.</div>\n'
             f'<div class="nav"><a class="logo" href="/">🧪 PaperPump</a><div class="links">{links}</div>'
             '<div class="sp"></div><span class="live" id="live" title="Data refreshes automatically">Live <i>●</i> '
