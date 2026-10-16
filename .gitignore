@@ -15,3 +15,6 @@ tunnel_watchdog.log
 bot.heartbeat
 paperpump_watchdog.log
 tunnel_watchdog.log
+paperpump_watchdog.sh
+tunnel_watchdog.sh
+backups/

@@ -71,3 +71,23 @@ Python 3.12 · python-telegram-bot 21 · FastAPI · SQLite (WAL) · httpx · Dex
 PaperPump is an educational simulator. It never connects to a wallet or executes real transactions. Simulated results don't predict real trading results. Not financial advice.
 
 Licensed under the [MIT License](LICENSE).
+
+## Hosting: from a tunnel to a VPS
+
+PaperPump first ran on my dev machine, exposed to the internet through a free
+ngrok tunnel. That setup was fragile: the tunnel kept dropping with heartbeat
+timeouts, and the Telegram bot's event loop would occasionally freeze, so the
+bot looked online but stopped answering.
+
+My first fix was local watchdog scripts that restarted the tunnel and the bot.
+That helped, but it was patching symptoms, so I moved PaperPump to a $6/mo
+DigitalOcean Droplet. The whole server is set up by a single cloud-init
+user-data script ([`deploy/digitalocean/`](deploy/digitalocean/)) pasted in at
+Droplet creation:
+
+- **systemd services** for the web app and bot, with `Restart=always`
+- **Freeze detection**: the bot writes a heartbeat file; a systemd timer restarts it if the heartbeat goes stale
+- **Caddy** reverse proxy with automatic HTTPS
+- **ufw** firewall (SSH, HTTP, HTTPS only) and **unattended-upgrades** for security patches
+- **No secrets in the repo**: the Telegram token is entered on the server (`paperpump-set-token`) and never stored in the script or repo
+- **One-command updates**: `paperpump-update` pulls the latest code and restarts the services
