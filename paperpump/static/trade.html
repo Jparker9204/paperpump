@@ -1,7 +1,7 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>PaperPump · Trade</title>
 <link rel="stylesheet" href="/static/app.css"></head><body>
-<main class="wrap">
+<main class="wrap nocoin" id="main">
   <div class="full sbox">
     <form class="search" id="searchForm" role="search">
       <input id="mint" type="search" placeholder="Search coin name, ticker or contract address" autocomplete="off"
@@ -11,6 +11,9 @@
     <div class="card results" id="results" role="listbox" hidden></div>
   </div>
 
+  <div class="full dwrap" id="feed"></div>
+
+  <div class="full backbar"><button class="btn sm" id="backFeed" type="button">← Back to feed</button></div>
   <div class="card pad full th" id="header"><span class="mu">Paste a contract address above to load a coin.</span></div>
 
   <div class="card chart" id="chart"><div class="empty">The live chart will appear here.</div></div>
@@ -39,8 +42,16 @@
   </div>
 </main>
 <script src="/static/app.js"></script>
+<script src="/static/discover.js"></script>
 <script>
 nav("Trade");
+const feedPoller = mountDiscover($("#feed"), (mint) => { $("#mint").value = ""; loadToken(mint); window.scrollTo(0, 0); });
+function showFeed(on) {
+  $("#main").classList.toggle("nocoin", on);
+  $("#feed").hidden = !on;
+  if (on) feedPoller.tick();
+}
+$("#backFeed").onclick = () => { token = null; history.replaceState(null, "", "/"); showFeed(true); window.scrollTo(0, 0); };
 let token = null, side = "buy", pct = 100, positions = [];
 
 // quick amount buttons
@@ -118,6 +129,7 @@ $("#searchForm").onsubmit = (e) => {
 
 async function loadToken(mint) {
   if (!mint) return;
+  showFeed(false);
   history.replaceState(null, "", "/?mint=" + encodeURIComponent(mint));
   $("#header").innerHTML = `<span class="mu">Loading…</span>`;
   try { token = await api("/api/token/" + encodeURIComponent(mint)); }

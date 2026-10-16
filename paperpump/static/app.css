@@ -100,3 +100,16 @@ button.ri+button.ri{border-top:1px solid #161b23}
   .dm{grid-column:1/-1;grid-template-columns:repeat(3,minmax(0,1fr));font-size:12px}
   .dm i{margin-left:0}
 }
+
+/* trade page: feed when no coin is open, trade view otherwise */
+.dwrap{display:grid;gap:14px}.dwrap[hidden]{display:none}
+.wrap.nocoin #header,.wrap.nocoin #chart,.wrap.nocoin #panel,.wrap.nocoin .backbar{display:none}
+.backbar{margin-bottom:-6px}
+/* nav: short labels on phones so every tab (incl. Discover) fits at ~360-390px */
+.links .sn{display:none}
+@media(max-width:600px){
+  .links{overflow-x:auto;scrollbar-width:none;gap:4px}.links::-webkit-scrollbar{display:none}
+  .links a{flex:0 0 auto;padding:6px 8px;border-radius:8px;font-size:13px}
+  .links a.on{background:#0f1d33;color:#93c5fd}
+}
+@media(max-width:480px){.links .ln{display:none}.links .sn{display:inline}}

@@ -6,8 +6,10 @@ Run: .venv/bin/uvicorn paperpump.web:app --host 127.0.0.1 --port 8000
 Shares the SQLite DB and trading logic (service.py) with the Telegram bot.
 """
 import asyncio
+import hashlib
 import hmac
 import json
+import re
 import time
 from pathlib import Path
 
@@ -29,10 +31,30 @@ OPEN_PATHS = {"/robots.txt", "/gate", "/login", "/static/app.css"}
 
 GATE_HTML = """<!doctype html><html><head><meta charset=utf-8><meta name=robots content="noindex,nofollow">
 <meta name=viewport content="width=device-width,initial-scale=1"><title>PaperPump</title>
-<link rel=stylesheet href=/static/app.css></head><body class=center><form method=post action=/gate class="card gate">
+<link rel=stylesheet href="/static/app.css"></head><body class=center><form method=post action=/gate class="card gate">
 <div class=logo>🧪 PaperPump</div><p class=mu>Private preview. Enter the password.</p>
 <input type=password name=password autofocus placeholder=Password>{err}<button class="btn primary">Enter</button>
 </form></body></html>"""
+
+
+NO_CACHE = {"Cache-Control": "no-cache, no-store, must-revalidate"}
+
+
+def asset_version() -> str:
+    """Short hash of every static asset: changes whenever a deploy changes any JS/CSS."""
+    h = hashlib.sha256()
+    for f in sorted(STATIC.glob("*")):
+        if f.suffix in (".js", ".css"):
+            h.update(f.name.encode() + f.read_bytes())
+    return h.hexdigest()[:10]
+
+
+ASSET_VERSION = asset_version()
+
+
+def versioned_html(fname: str) -> str:
+    html = (STATIC / fname).read_text()
+    return re.sub(r'(/static/[\w.-]+\.(?:js|css))"', rf'\1?v={ASSET_VERSION}"', html)
 
 
 class BuyIn(BaseModel):
@@ -122,18 +144,20 @@ def create_app(cfg: config.Config, db: DB, prices, sleep=asyncio.sleep, feed=Non
 
     def _page(fname):
         async def page():
-            return FileResponse(STATIC / fname)
+            return HTMLResponse(versioned_html(fname), headers=NO_CACHE)
         return page
 
     for route, fname in PAGES.items():
         app.add_api_route(route, _page(fname), methods=["GET"], include_in_schema=False)
 
     @app.get("/static/{name}")
-    async def static(name: str):
+    async def static(name: str, request: Request):
         f = (STATIC / name).resolve()
         if f.parent != STATIC.resolve() or not f.is_file():
             raise HTTPException(404)
-        return FileResponse(f)
+        # ?v=<content hash> URLs change on every deploy, so they can be cached for long; bare URLs revalidate
+        cc = "public, max-age=31536000, immutable" if request.query_params.get("v") == ASSET_VERSION else "no-cache"
+        return FileResponse(f, headers={"Cache-Control": cc})
 
     # ---------------- API ----------------
     async def sol_usd():

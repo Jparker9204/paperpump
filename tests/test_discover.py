@@ -133,7 +133,7 @@ def test_web_discover_and_saved_filters():
     assert db.get_pref(2, "discover_filters") is None  # per user
     assert client.post("/api/discover/filters", json={}).json() == {}
     assert len(client.get("/api/discover").json()["rows"]) == 2
-    assert "/api/discover" in client.get("/discover").text
+    assert "mountDiscover(" in client.get("/discover").text
 
 
 def test_bot_trending_button_top5():

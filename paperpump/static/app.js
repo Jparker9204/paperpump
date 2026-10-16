@@ -38,8 +38,8 @@ function nav(active) {
   document.body.insertAdjacentHTML("afterbegin", `
   <div class="banner">🧪 Paper trading only. Fake SOL, real prices. Not financial advice.</div>
   <div class="nav"><a class="logo" href="/">🧪 PaperPump</a>
-    <div class="links">${[["/", "Trade"], ["/discover", "Discover"], ["/portfolio", "Portfolio"], ["/history", "History"], ["/leaderboard", "Leaderboard"]]
-      .map(([h, n]) => `<a href="${h}" class="${n === active ? "on" : ""}">${n}</a>`).join("")}</div>
+    <div class="links">${[["/", "Trade"], ["/discover", "Discover"], ["/portfolio", "Portfolio"], ["/history", "History", "Trades"], ["/leaderboard", "Leaderboard", "Ranks"]]
+      .map(([h, n, s]) => `<a href="${h}" class="${n === active ? "on" : ""}"><span class="ln">${n}</span><span class="sn">${s || n}</span></a>`).join("")}</div>
     <div class="sp"></div><span class="live" id="live" title="Data refreshes automatically">Live <i>●</i> <span id="ago"></span></span>
     <div class="pill" id="bal">… SOL (paper)</div></div>
   <div class="toast" id="toast"></div>`);
@@ -67,6 +67,7 @@ function live(fn, ms) {
   p.tick = tick;
   pollers.push(p);
   tick();
+  return p;
 }
 // Refresh everything now (call after your own buy/sell/TP/SL).
 function liveNow() { pollers.forEach((p) => p.tick()); }
