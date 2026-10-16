@@ -52,8 +52,24 @@ def asset_version() -> str:
 ASSET_VERSION = asset_version()
 
 
-def versioned_html(fname: str) -> str:
-    html = (STATIC / fname).read_text()
+# One shared nav partial for every page: (path, label, short label for phones).
+NAV_LINKS = (("/", "Trade", "Trade"), ("/discover", "Discover", "Discover"), ("/portfolio", "Portfolio", "Portfolio"),
+             ("/history", "History", "Trades"), ("/leaderboard", "Leaderboard", "Ranks"))
+
+
+def nav_html(active_path: str) -> str:
+    links = "".join(f'<a href="{h}" class="{"on" if h == active_path else ""}"'
+                    f'{" aria-current=\"page\"" if h == active_path else ""}>'
+                    f'<span class="ln">{n}</span><span class="sn">{s}</span></a>' for h, n, s in NAV_LINKS)
+    return ('<div class="banner">🧪 Paper trading only. Fake SOL, real prices. Not financial advice.</div>\n'
+            f'<div class="nav"><a class="logo" href="/">🧪 PaperPump</a><div class="links">{links}</div>'
+            '<div class="sp"></div><span class="live" id="live" title="Data refreshes automatically">Live <i>●</i> '
+            '<span id="ago"></span></span><div class="pill" id="bal">… SOL (paper)</div></div>\n'
+            '<div class="toast" id="toast"></div>')
+
+
+def versioned_html(fname: str, active_path: str = "") -> str:
+    html = (STATIC / fname).read_text().replace("<!--NAV-->", nav_html(active_path), 1)
     return re.sub(r'(/static/[\w.-]+\.(?:js|css))"', rf'\1?v={ASSET_VERSION}"', html)
 
 
@@ -142,13 +158,13 @@ def create_app(cfg: config.Config, db: DB, prices, sleep=asyncio.sleep, feed=Non
         resp.delete_cookie("pp_session")
         return resp
 
-    def _page(fname):
+    def _page(route, fname):
         async def page():
-            return HTMLResponse(versioned_html(fname), headers=NO_CACHE)
+            return HTMLResponse(versioned_html(fname, route), headers=NO_CACHE)
         return page
 
     for route, fname in PAGES.items():
-        app.add_api_route(route, _page(fname), methods=["GET"], include_in_schema=False)
+        app.add_api_route(route, _page(route, fname), methods=["GET"], include_in_schema=False)
 
     @app.get("/static/{name}")
     async def static(name: str, request: Request):

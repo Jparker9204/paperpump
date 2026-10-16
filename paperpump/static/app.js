@@ -34,8 +34,10 @@ function showLoggedOut() {
   }
 }
 
+// The nav is rendered server-side from ONE partial (web.py NAV_LINKS) into every page.
+// nav() only inserts this copy as a fallback if a page somehow arrives without it.
 function nav(active) {
-  document.body.insertAdjacentHTML("afterbegin", `
+  if (!$(".nav")) document.body.insertAdjacentHTML("afterbegin", `
   <div class="banner">🧪 Paper trading only. Fake SOL, real prices. Not financial advice.</div>
   <div class="nav"><a class="logo" href="/">🧪 PaperPump</a>
     <div class="links">${[["/", "Trade"], ["/discover", "Discover"], ["/portfolio", "Portfolio"], ["/history", "History", "Trades"], ["/leaderboard", "Leaderboard", "Ranks"]]

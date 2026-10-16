@@ -49,3 +49,21 @@ def test_nav_has_discover_and_short_phone_labels(client):
     assert '["/discover", "Discover"]' in js and "Ranks" in js
     css = client.get("/static/app.css").text
     assert "max-width:480px" in css and ".links .sn" in css
+
+
+def nav_links(html):
+    nav = re.search(r'<div class="links">(.*?)</div>', html, re.S).group(1)
+    return re.findall(r'<a href="([^"]+)"', nav), re.findall(r'<a href="([^"]+)" class="on"', nav)
+
+
+def test_every_page_has_the_same_server_rendered_nav(client):
+    seen = {}
+    for path in web.PAGES:
+        html = client.get(path).text
+        assert html.count('class="nav"') == 1 and "<!--NAV-->" not in html
+        links, active = nav_links(html)
+        seen[path] = links
+        assert active == [path]  # exactly one highlighted tab: this page
+        assert "Ranks" in html and "Trades" in html and "/discover" in links
+    assert len({tuple(v) for v in seen.values()}) == 1
+    assert seen["/"] == [h for h, _, _ in web.NAV_LINKS]
