@@ -10,3 +10,8 @@ screens/*.tmp
 *.db-wal
 *.db-shm
 *.db-journal
+tunnel_watchdog.log
+
+bot.heartbeat
+paperpump_watchdog.log
+tunnel_watchdog.log

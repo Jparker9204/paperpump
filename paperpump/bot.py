@@ -2,6 +2,7 @@
 import asyncio
 import logging
 import time
+from pathlib import Path
 
 from telegram import BotCommand, Update
 from telegram.constants import ParseMode
@@ -257,11 +258,16 @@ async def on_error(update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 async def loop_watchdog():
-    """Logs a warning if something blocks the event loop (helps catch freezes)."""
+    """Logs freezes and touches a heartbeat file so an external checker can restart us."""
+    hb = Path(__file__).resolve().parent.parent / "bot.heartbeat"
     while True:
         t = time.monotonic()
         await asyncio.sleep(1)
         lag = time.monotonic() - t - 1
+        try:
+            hb.write_text(f"{time.time():.3f} lag={lag:.2f}\n")
+        except OSError:
+            pass
         if lag > 0.5:
             log.warning("event loop was blocked for %.1fs", lag)
 
