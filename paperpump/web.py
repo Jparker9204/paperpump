@@ -7,6 +7,8 @@ Shares the SQLite DB and trading logic (service.py) with the Telegram bot.
 """
 import asyncio
 import hmac
+import json
+import time
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
@@ -14,6 +16,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from pydantic import BaseModel, Field
 
 from . import auth, config
+from . import discover as dv
 from . import fill as fm
 from .db import DB
 from .prices import DexScreener
@@ -21,7 +24,7 @@ from .service import MINT_RE, TradeError, Trader
 
 STATIC = Path(__file__).parent / "static"
 PAGES = {"/": "trade.html", "/portfolio": "portfolio.html", "/history": "history.html",
-         "/leaderboard": "leaderboard.html"}
+         "/leaderboard": "leaderboard.html", "/discover": "discover.html"}
 OPEN_PATHS = {"/robots.txt", "/gate", "/login", "/static/app.css"}
 
 GATE_HTML = """<!doctype html><html><head><meta charset=utf-8><meta name=robots content="noindex,nofollow">
@@ -48,8 +51,9 @@ class TpSlIn(BaseModel):
     sl: float | None = Field(default=None, ge=0, le=100)
 
 
-def create_app(cfg: config.Config, db: DB, prices, sleep=asyncio.sleep) -> FastAPI:
+def create_app(cfg: config.Config, db: DB, prices, sleep=asyncio.sleep, feed=None) -> FastAPI:
     app = FastAPI(title="PaperPump", docs_url=None, redoc_url=None, openapi_url=None)
+    feed = feed or dv.Discover(prices)  # ONE shared cached feed for every user
     trader = Trader(db, prices, cfg, sleep=sleep)
     secret = cfg.session_secret
     secure = cfg.base_url.startswith("https://")
@@ -159,6 +163,26 @@ def create_app(cfg: config.Config, db: DB, prices, sleep=asyncio.sleep) -> FastA
             return token_json(await trader._q(mint))
         except TradeError as e:
             err(e)
+
+    def my_filters(u) -> dict:
+        try:
+            return dv.clean_filters(json.loads(db.get_pref(u["tg_id"], "discover_filters", "{}")))
+        except ValueError:
+            return {}
+
+    @app.get("/api/discover")
+    async def discover(tab: str = "trending", tf: str = "h1", u=Depends(current_user)):
+        """Cached shared feed; the user's saved filters are applied here (no upstream call per user)."""
+        rows, f = await feed.get(), my_filters(u)
+        return {"updated": feed.updated, "age_s": time.time() - feed.updated if feed.updated else None,
+                "refresh_s": feed.refresh_s, "filters": f, "presets": dv.PRESETS,
+                "rows": dv.view(rows, tab, tf, f), "total": len(rows)}
+
+    @app.post("/api/discover/filters")
+    async def save_filters(body: dict, u=Depends(current_user)):
+        f = dv.clean_filters(body)
+        db.set_pref(u["tg_id"], "discover_filters", json.dumps(f))
+        return f
 
     @app.get("/api/search")
     async def search(q: str = "", u=Depends(current_user)):

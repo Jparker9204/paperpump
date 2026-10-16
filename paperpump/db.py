@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS trades(
   id INTEGER PRIMARY KEY, tg_id INTEGER NOT NULL, position_id INTEGER, mint TEXT, symbol TEXT,
   side TEXT, sol REAL, tokens REAL, fee_sol REAL, impact_pct REAL, naive REAL,
   pnl_sol REAL, ts REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS user_prefs(tg_id INTEGER NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL,
+  PRIMARY KEY(tg_id, key));
 CREATE TABLE IF NOT EXISTS login_nonces(nonce TEXT PRIMARY KEY, used_at REAL NOT NULL);
 """
 
@@ -69,6 +71,15 @@ class DB:
                 self.c.execute("ALTER TABLE users ADD COLUMN reset_count INTEGER NOT NULL DEFAULT 0")
                 # existing users who already reset at least once (exact older count is unknown)
                 self.c.execute("UPDATE users SET reset_count=1 WHERE last_reset IS NOT NULL")
+
+    def get_pref(self, tg_id, key, default=None):
+        r = self.c.execute("SELECT value FROM user_prefs WHERE tg_id=? AND key=?", (tg_id, key)).fetchone()
+        return r["value"] if r else default
+
+    def set_pref(self, tg_id, key, value: str):
+        with self.tx():
+            self.c.execute("INSERT INTO user_prefs VALUES(?,?,?) ON CONFLICT(tg_id,key) DO UPDATE SET value=excluded.value",
+                           (tg_id, key, value))
 
     def user(self, tg_id):
         return self.c.execute("SELECT * FROM users WHERE tg_id=?", (tg_id,)).fetchone()

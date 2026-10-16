@@ -1,0 +1,79 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>PaperPump · Discover</title>
+<link rel="stylesheet" href="/static/app.css"></head><body>
+<main class="wrap">
+  <div class="card full pad dtop">
+    <div class="seg" id="tabs" role="tablist">
+      <button data-tab="trending" class="on">🔥 Trending</button><button data-tab="new">🌱 New pairs</button><button data-tab="gainers">🚀 Gainers</button>
+    </div>
+    <div class="dbar">
+      <div class="seg sm" id="tfs"><button data-tf="m5">5m</button><button data-tf="h1" class="on">1h</button><button data-tf="h6">6h</button><button data-tf="h24">24h</button></div>
+      <button class="btn sm" id="fbtn" aria-expanded="false">⚙️ Filters <span id="fcount"></span></button>
+    </div>
+    <form id="fpanel" class="fpanel" hidden>
+      <div class="presets" id="presets"></div>
+      <div class="fgrid">
+        <div><label>Min market cap ($)</label><input name="min_mc" type="number" inputmode="decimal" min="0"></div>
+        <div><label>Max market cap ($)</label><input name="max_mc" type="number" inputmode="decimal" min="0"></div>
+        <div><label>Min liquidity ($)</label><input name="min_liq" type="number" inputmode="decimal" min="0"></div>
+        <div><label>Min volume ($, timeframe)</label><input name="min_vol" type="number" inputmode="decimal" min="0"></div>
+        <div><label>Min age (minutes)</label><input name="min_age_m" type="number" inputmode="decimal" min="0"></div>
+        <div><label>Max age (minutes)</label><input name="max_age_m" type="number" inputmode="decimal" min="0"></div>
+        <div><label>Min % change (timeframe)</label><input name="min_change" type="number" inputmode="decimal"></div>
+      </div>
+      <div class="factions"><button type="button" class="btn sm" id="freset">Reset</button><button class="btn primary sm">Apply &amp; save</button></div>
+    </form>
+  </div>
+  <div class="card full"><div class="dlist" id="list"><div class="empty" style="padding:40px">Loading the feed…</div></div>
+    <div class="pad mu" id="foot"></div></div>
+</main>
+<script src="/static/app.js"></script>
+<script>
+nav("Discover");
+const S = JSON.parse(localStorage.getItem("pp_disc") || '{"tab":"trending","tf":"h1"}');
+const TFL = { m5: "5m", h1: "1h", h6: "6h", h24: "24h" };
+const pctTxt = (v) => (v > 0 ? "+" : "") + (Math.abs(v) >= 1000 ? Math.round(v).toLocaleString() : v.toFixed(1)) + "%";
+const ageTxt = (m) => m == null ? "?" : m < 60 ? Math.round(m) + "m" : m < 1440 ? Math.round(m / 60) + "h" : Math.round(m / 1440) + "d";
+const num = (n) => n >= 1e3 ? (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + "K" : String(n);
+function mark(sel, attr, val) { document.querySelectorAll(sel + " button").forEach((b) => b.classList.toggle("on", b.dataset[attr] === val)); }
+function save() { localStorage.setItem("pp_disc", JSON.stringify({ tab: S.tab, tf: S.tf })); }
+mark("#tabs", "tab", S.tab); mark("#tfs", "tf", S.tf);
+$("#tabs").onclick = (e) => { const t = e.target.dataset.tab; if (!t) return; S.tab = t; save(); mark("#tabs", "tab", t); liveNow(); };
+$("#tfs").onclick = (e) => { const t = e.target.dataset.tf; if (!t) return; S.tf = t; save(); mark("#tfs", "tf", t); liveNow(); };
+$("#fbtn").onclick = () => { const p = $("#fpanel"); p.hidden = !p.hidden; $("#fbtn").setAttribute("aria-expanded", !p.hidden); };
+
+let presets = {}, filters = {};
+function fillForm(f) { for (const el of $("#fpanel").querySelectorAll("input")) el.value = f[el.name] ?? ""; }
+function showCount() { const n = Object.keys(filters).length; setText($("#fcount"), n ? `(${n})` : ""); }
+async function saveFilters(f) {
+  try { filters = await api("/api/discover/filters", f); fillForm(filters); showCount(); liveNow(); toast("Filters saved"); }
+  catch (e) { toast("❌ " + esc(e.message)); }
+}
+$("#fpanel").onsubmit = (e) => {
+  e.preventDefault();
+  const f = {}; for (const el of e.target.querySelectorAll("input")) if (el.value !== "") f[el.name] = +el.value;
+  saveFilters(f);
+};
+$("#freset").onclick = () => saveFilters({});
+$("#presets").onclick = (e) => { const k = e.target.dataset.p; if (k) saveFilters(presets[k]); };
+$("#list").onclick = (e) => { const r = e.target.closest("[data-mint]"); if (r) location.href = "/?mint=" + encodeURIComponent(r.dataset.mint); };
+
+live(async () => {
+  const d = await api(`/api/discover?tab=${S.tab}&tf=${S.tf}`);
+  if (!Object.keys(presets).length) {
+    presets = d.presets;
+    $("#presets").innerHTML = Object.keys(presets).map((k) => `<button type="button" class="btn sm" data-p="${esc(k)}">${esc(k[0].toUpperCase() + k.slice(1))}</button>`).join("");
+    filters = d.filters; fillForm(filters); showCount();
+  }
+  const tf = S.tf;
+  setHTML($("#list"), d.rows.length ? d.rows.map((r) => `
+    <button type="button" class="drow" data-mint="${esc(r.mint)}">
+      ${r.icon ? `<img class="ic" src="${esc(r.icon)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : `<span class="ic ph">${esc(r.symbol.slice(0, 1))}</span>`}
+      <span class="dn"><b>${esc(r.symbol)}</b><span class="mu">${esc(r.name)}</span></span>
+      <span class="dc ${r.change[tf] >= 0 ? "g" : "r"}">${pctTxt(r.change[tf])}<i>${TFL[tf]}</i></span>
+      <span class="dm"><span><i>MC</i>${usd(r.market_cap)}</span><span><i>Liq</i>${usd(r.liquidity_usd)}</span><span><i>Vol</i>${usd(r.volume[tf])}</span><span><i>Txns</i>${num(r.txns[tf])}</span><span><i>Age</i>${ageTxt(r.age_m)}</span></span>
+    </button>`).join("") : `<div class="empty" style="padding:40px">${d.total ? "No coins match your filters." : "The feed is loading or the data source is busy. It retries automatically."}</div>`);
+  setText($("#foot"), `${d.rows.length} of ${d.total} coins · Solana, SOL pairs, liquidity ≥ $1K · shared feed refreshes every ~${Math.round(d.refresh_s)}s` +
+    (d.age_s != null ? ` · updated ${Math.round(d.age_s)}s ago` : ""));
+}, 30000);
+</script></body></html>

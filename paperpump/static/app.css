@@ -72,3 +72,31 @@ button.ri+button.ri{border-top:1px solid #161b23}
 .rs{display:flex;gap:14px;flex-shrink:0;color:#93c5fd;font-weight:600;font-size:13px}
 .rs i{font-style:normal;color:var(--m);font-size:11px;margin-right:4px}
 @media(max-width:600px){.ri{flex-direction:column;align-items:flex-start;gap:4px}.rn{width:100%}.rs{gap:12px;font-size:12px}}
+
+/* discover feed */
+.dtop{display:grid;gap:10px}
+.seg{display:flex;background:var(--p2);border-radius:9px;padding:3px;gap:3px;overflow-x:auto}
+.seg button{flex:1;background:none;border:0;color:var(--m);padding:9px 10px;border-radius:7px;font:inherit;font-weight:700;cursor:pointer;white-space:nowrap;min-height:40px}
+.seg button.on{background:var(--a);color:#fff}
+.seg.sm button{padding:6px 10px;min-height:34px}
+.dbar{display:flex;gap:8px;align-items:center;justify-content:space-between}
+.dbar .seg{flex:0 1 260px}
+.fpanel{border-top:1px solid var(--b);padding-top:10px}
+.presets{display:flex;gap:6px;flex-wrap:wrap}
+.fgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:0 10px}
+.factions{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
+.dlist{display:grid}
+.drow{display:grid;grid-template-columns:40px minmax(0,1.2fr) 90px minmax(0,3fr);align-items:center;gap:12px;background:none;border:0;color:var(--t);font:inherit;text-align:left;padding:10px 14px;cursor:pointer;width:100%}
+.drow+.drow{border-top:1px solid #161b23}
+.drow:hover,.drow:focus-visible{background:#0f1d33;outline:none}
+.ic{width:40px;height:40px;border-radius:50%;object-fit:cover;background:#0f1d33}
+.ic.ph{display:grid;place-items:center;color:#93c5fd;font-weight:800}
+.dn{display:flex;flex-direction:column;min-width:0}.dn>*{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dc{font-weight:700;text-align:right}.dc i,.dm i{font-style:normal;color:var(--m);font-size:11px;margin:0 4px}
+.dm{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;color:#93c5fd;font-size:13px;font-weight:600}
+.dm>span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media(max-width:700px){
+  .drow{grid-template-columns:40px minmax(0,1fr) auto;row-gap:6px;padding:10px 12px}
+  .dm{grid-column:1/-1;grid-template-columns:repeat(3,minmax(0,1fr));font-size:12px}
+  .dm i{margin-left:0}
+}

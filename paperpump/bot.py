@@ -10,6 +10,7 @@ from telegram.error import BadRequest, TelegramError
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
 from . import auth, config, ui
+from . import discover as dv
 from .db import DB
 from .prices import DexScreener
 from .service import MINT_RE, TradeError, Trader, buy_text, leaderboard_text, portfolio_text, sell_text
@@ -116,7 +117,17 @@ async def do_search(update, ctx, query):
     await send(update, ui.search_text(query, res), ui.search_kb(res))
 
 
-SCREENS = {"menu": show_menu, "sr": show_search, "pf": show_portfolio, "st": show_stats, "hi": show_history,
+async def show_trending(update, ctx, edit=False):
+    ensure_user(update, ctx)
+    feed = ctx.bot_data.setdefault("discover", dv.Discover(T(ctx).prices))  # one shared cached feed
+    try:
+        rows = dv.view(await asyncio.wait_for(feed.get(), 10), "trending", "h1", limit=5)
+    except Exception:
+        rows = []
+    await send(update, ui.trending_text(rows), ui.trending_kb(rows), edit)
+
+
+SCREENS = {"menu": show_menu, "sr": show_search, "tr": show_trending, "pf": show_portfolio, "st": show_stats, "hi": show_history,
            "lb": show_leaderboard, "rs": show_reset, "hp": show_help,
            "web": show_web}
 

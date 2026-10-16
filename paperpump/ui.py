@@ -6,7 +6,9 @@ from telegram import InlineKeyboardMarkup, ReplyKeyboardMarkup
 
 PORTFOLIO, STATS, HISTORY, LEADERBOARD, RESET, HELP, SEARCH = (
     "💼 Portfolio", "📊 Stats", "📜 History", "🏆 Leaderboard", "🔄 Reset", "❓ Help", "🔍 Search")
-MENU_LABELS = {PORTFOLIO: "pf", STATS: "st", HISTORY: "hi", LEADERBOARD: "lb", RESET: "rs", HELP: "hp", SEARCH: "sr"}
+TRENDING = "🔥 Trending"
+MENU_LABELS = {PORTFOLIO: "pf", STATS: "st", HISTORY: "hi", LEADERBOARD: "lb", RESET: "rs", HELP: "hp", SEARCH: "sr",
+               TRENDING: "tr"}
 SEARCH_PROMPT = "🔍 Type a coin name, ticker or contract address."
 SEARCH_RESULTS = 5
 BUY_AMOUNTS = ("0.1", "0.25", "0.5", "1")
@@ -29,7 +31,8 @@ HELP_TEXT = (
 
 
 def reply_keyboard() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup([[SEARCH, PORTFOLIO, STATS], [HISTORY, LEADERBOARD, RESET, HELP]],
+    return ReplyKeyboardMarkup([[SEARCH, TRENDING, PORTFOLIO], [STATS, HISTORY, LEADERBOARD],
+                                [RESET, HELP]],
                                resize_keyboard=True, is_persistent=True)
 
 
@@ -44,7 +47,7 @@ def menu_text(balance: float) -> str:
 
 def menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [B(SEARCH, callback_data="m|sr")],
+        [B(SEARCH, callback_data="m|sr"), B(TRENDING, callback_data="m|tr")],
         [B(PORTFOLIO, callback_data="m|pf"), B(STATS, callback_data="m|st")],
         [B(HISTORY, callback_data="m|hi"), B(LEADERBOARD, callback_data="m|lb")],
         [B(RESET, callback_data="m|rs"), B(HELP, callback_data="m|hp")],
@@ -88,6 +91,22 @@ def search_kb(results) -> InlineKeyboardMarkup:
     rows.append([B("🔍 New search", callback_data="m|sr")])
     rows.append(back_row())
     return InlineKeyboardMarkup(rows)
+
+
+def trending_text(rows) -> str:
+    if not rows:
+        return "🔥 The trending feed is loading. Try again in a few seconds."
+    lines = [f"{i}. <b>${esc(r['symbol'])}</b> {r['change']['h1']:+.1f}% (1h) · MC {short_usd(r['market_cap'])} · "
+             f"Vol {short_usd(r['volume']['h1'])}" for i, r in enumerate(rows, 1)]
+    return "🔥 <b>Trending on Solana (1h)</b>\n" + "\n".join(lines) + "\n\nTap a coin to open it:"
+
+
+def trending_kb(rows) -> InlineKeyboardMarkup:
+    kb = [[B(f"{r['symbol'][:12]} · {r['name'][:16]} · MC {short_usd(r['market_cap'])}", callback_data=f"tk|{r['mint']}")]
+          for r in rows[:5]]
+    kb.append([B("🔄 Refresh", callback_data="m|tr"), B(SEARCH, callback_data="m|sr")])
+    kb.append(back_row())
+    return InlineKeyboardMarkup(kb)
 
 
 def after_trade_kb() -> InlineKeyboardMarkup:
