@@ -3,6 +3,7 @@ import asyncio
 import time
 from collections import deque
 from dataclasses import dataclass
+from urllib.parse import quote as urlquote
 
 import httpx
 
@@ -52,6 +53,26 @@ def parse_pairs(mint: str, data) -> Quote | None:
                  float((p.get("volume") or {}).get("h24") or 0), p.get("pairAddress", ""))
 
 
+MIN_SEARCH_LIQ = 1000.0  # drop junk/dead pools from search results
+SEARCH_LIMIT = 10
+
+
+def parse_search(data, min_liq: float = MIN_SEARCH_LIQ, limit: int = SEARCH_LIMIT) -> list[Quote]:
+    """Search results: Solana pairs quoted in SOL (so the buy view can trade them), liquidity >= min_liq,
+    one entry per token (its highest-liquidity pair), sorted by liquidity."""
+    best: dict[str, dict] = {}
+    for p in (data or {}).get("pairs") or []:
+        liq = float((p.get("liquidity") or {}).get("usd") or 0)
+        mint = (p.get("baseToken") or {}).get("address")
+        if (p.get("chainId") != "solana" or not mint or not p.get("priceNative") or liq < min_liq
+                or (p.get("quoteToken") or {}).get("address") != WSOL):
+            continue
+        if mint not in best or liq > float(best[mint]["liquidity"]["usd"]):
+            best[mint] = p
+    ranked = sorted(best.values(), key=lambda p: -float(p["liquidity"]["usd"]))[:limit]
+    return [q for p in ranked if (q := parse_pairs(p["baseToken"]["address"], [p]))]
+
+
 class RateLimited(Exception):
     """DexScreener said 429 (or our own budget is used up) and there is no cached value to fall back on."""
 
@@ -76,6 +97,7 @@ class DexScreener:
         self._calls: deque[float] = deque()
         self._backoff_until = 0.0
         self._backoff = 0.0
+        self._search_cache: dict[str, tuple[float, list[Quote]]] = {}
 
     # ----- upstream with budget + backoff -----
     async def _get(self, url: str):
@@ -144,6 +166,34 @@ class DexScreener:
                 return res
             out.update(await self._coalesce(("many", chunk), fetch))
         return out
+
+    SEARCH_TTL = 30.0
+
+    async def search(self, query: str) -> list[Quote]:
+        """Coin search by name, ticker or contract address. Uses the same rate budget as quotes; results are
+        cached for SEARCH_TTL per normalized query and concurrent identical searches share one call."""
+        key = " ".join(query.lower().split())[:64]
+        if len(key) < 2:
+            return []
+        hit = self._search_cache.get(key)
+        if hit and time.time() - hit[0] < self.SEARCH_TTL:
+            return hit[1]
+
+        async def fetch():
+            try:
+                res = parse_search(await self._get(f"{DEX}/latest/dex/search?q={urlquote(key)}"))
+            except RateLimited:
+                if key in self._search_cache:
+                    return self._search_cache[key][1]  # stale but better than nothing
+                raise
+            now = time.time()
+            if len(self._search_cache) > 500:
+                self._search_cache.clear()
+            self._search_cache[key] = (now, res)
+            for q in res:  # warm the quote cache so opening a result is instant
+                self._cache.setdefault(q.mint, (now, q))
+            return res
+        return await self._coalesce(("search", key), fetch)
 
     async def sol_usd(self) -> float:
         if time.time() - self._sol[1] < 60:

@@ -2,10 +2,14 @@
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>PaperPump · Trade</title>
 <link rel="stylesheet" href="/static/app.css"></head><body>
 <main class="wrap">
-  <form class="search full" id="searchForm">
-    <input id="mint" placeholder="Paste a Solana contract address (e.g. from DexScreener or pump.fun)" autocomplete="off">
-    <button class="btn primary">Load</button>
-  </form>
+  <div class="full sbox">
+    <form class="search" id="searchForm" role="search">
+      <input id="mint" type="search" placeholder="Search coin name, ticker or contract address" autocomplete="off"
+             autocapitalize="off" spellcheck="false" enterkeyhint="search" aria-label="Search coins" aria-controls="results">
+      <button class="btn primary">Go</button>
+    </form>
+    <div class="card results" id="results" role="listbox" hidden></div>
+  </div>
 
   <div class="card pad full th" id="header"><span class="mu">Paste a contract address above to load a coin.</span></div>
 
@@ -72,7 +76,45 @@ function setSide(s) {
   preview();
 }
 
-$("#searchForm").onsubmit = (e) => { e.preventDefault(); loadToken($("#mint").value.trim()); };
+// ---------- coin search (debounced; server shares DexScreener cache + rate budget) ----------
+const isMint = (s) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(s);
+let searchSeq = 0, lastResults = [];
+function hideResults() { $("#results").hidden = true; }
+function showResults(html) { $("#results").innerHTML = html; $("#results").hidden = false; }
+async function runSearch(q) {
+  const seq = ++searchSeq;
+  showResults(`<div class="ri mu">Searching…</div>`);
+  try {
+    const res = await api("/api/search?q=" + encodeURIComponent(q));
+    if (seq !== searchSeq) return;  // a newer query is on its way
+    lastResults = res;
+    showResults(res.length ? res.map((r) => `
+      <button type="button" class="ri" role="option" data-mint="${esc(r.mint)}">
+        <span class="rn"><b>${esc(r.name)}</b> <span class="mu">$${esc(r.symbol)}</span></span>
+        <span class="rs"><span><i>MC</i>${usd(r.market_cap)}</span><span><i>Liq</i>${usd(r.liquidity_usd)}</span><span><i>Vol</i>${usd(r.volume_24h)}</span></span>
+      </button>`).join("") : `<div class="ri mu">No Solana coins found.</div>`);
+  } catch (e) { if (seq === searchSeq) showResults(`<div class="ri r">${esc(e.message)}</div>`); }
+}
+$("#mint").oninput = () => {
+  clearTimeout(window._sq);
+  const q = $("#mint").value.trim();
+  if (q.length < 2) { searchSeq++; lastResults = []; return hideResults(); }
+  window._sq = setTimeout(() => runSearch(q), 400);
+};
+$("#mint").onfocus = () => { if (lastResults.length) $("#results").hidden = false; };
+$("#results").onclick = (e) => {
+  const b = e.target.closest("[data-mint]"); if (!b) return;
+  hideResults(); $("#mint").blur(); loadToken(b.dataset.mint);
+};
+document.addEventListener("click", (e) => { if (!e.target.closest(".sbox")) hideResults(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") hideResults(); });
+$("#searchForm").onsubmit = (e) => {
+  e.preventDefault();
+  clearTimeout(window._sq);
+  const q = $("#mint").value.trim();
+  if (isMint(q)) { hideResults(); return loadToken(q); }
+  if (q.length >= 2) runSearch(q);
+};
 
 async function loadToken(mint) {
   if (!mint) return;

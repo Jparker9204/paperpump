@@ -160,6 +160,19 @@ def create_app(cfg: config.Config, db: DB, prices, sleep=asyncio.sleep) -> FastA
         except TradeError as e:
             err(e)
 
+    @app.get("/api/search")
+    async def search(q: str = "", u=Depends(current_user)):
+        """Coin search by name, ticker or contract address (Solana only, deduped, junk filtered, cached)."""
+        q = q.strip()[:64]
+        if len(q) < 2:
+            return []
+        try:
+            res = await asyncio.wait_for(prices.search(q), 8)
+        except Exception as e:
+            raise HTTPException(503, "Search is busy, try again in a moment.") from e
+        return [{"mint": r.mint, "name": r.name, "symbol": r.symbol.lstrip("$"), "market_cap": r.market_cap,
+                 "liquidity_usd": r.liquidity_usd, "volume_24h": r.volume_24h} for r in res]
+
     @app.get("/api/quotes")
     async def quotes(mints: str, u=Depends(current_user)):
         """Live prices for several coins in one call (shared ~1s cache, batched upstream). Max 30."""

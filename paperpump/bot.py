@@ -100,7 +100,23 @@ async def show_web(update, ctx, edit=False):
                "Don't share it.", ui.web_link_kb(url))
 
 
-SCREENS = {"menu": show_menu, "pf": show_portfolio, "st": show_stats, "hi": show_history,
+async def show_search(update, ctx, edit=False):
+    ensure_user(update, ctx)
+    ctx.user_data.pop("custom_mint", None)
+    ctx.user_data["searching"] = True
+    await send(update, ui.SEARCH_PROMPT, ui.back_kb(), edit)
+
+
+async def do_search(update, ctx, query):
+    try:
+        res = await asyncio.wait_for(T(ctx).prices.search(query), 8)
+    except Exception:
+        log.warning("search failed", exc_info=True)
+        return await send(update, "Search is busy right now, try again in a moment.", ui.search_kb([]))
+    await send(update, ui.search_text(query, res), ui.search_kb(res))
+
+
+SCREENS = {"menu": show_menu, "sr": show_search, "pf": show_portfolio, "st": show_stats, "hi": show_history,
            "lb": show_leaderboard, "rs": show_reset, "hp": show_help,
            "web": show_web}
 
@@ -133,10 +149,14 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     text = (update.effective_message.text or "").strip()
     if text in ui.MENU_LABELS:
         ctx.user_data.pop("custom_mint", None)
+        ctx.user_data.pop("searching", None)
         return await SCREENS[ui.MENU_LABELS[text]](update, ctx)
     if MINT_RE.match(text):
         ctx.user_data.pop("custom_mint", None)
+        ctx.user_data.pop("searching", None)
         return await token_card(update, ctx, text)
+    if ctx.user_data.pop("searching", None):
+        return await do_search(update, ctx, text[:64])
     mint = ctx.user_data.get("custom_mint")
     if mint:
         amt = ui.parse_amount(text)
@@ -158,9 +178,13 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         log.warning("answer_callback_query failed: %s", e)
     tr, uid = T(ctx), update.effective_user.id
     if kind == "m":
+        if parts[1] != "sr":
+            ctx.user_data.pop("searching", None)
         return await SCREENS.get(parts[1], show_menu)(update, ctx, edit=True)
     if kind == "b":
         return await do_buy(update, ctx, parts[2], float(parts[1]))
+    if kind == "tk":
+        return await token_card(update, ctx, parts[1])
     if kind == "c":
         ctx.user_data["custom_mint"] = parts[1]
         return await send(update, "✏️ How much SOL do you want to spend? Type a number, like <b>0.3</b>.", ui.back_kb())
